@@ -19,15 +19,20 @@ package org.springframework.ai.vectorstore.clickhouse;
 import com.clickhouse.client.api.Client;
 import com.clickhouse.client.api.insert.InsertResponse;
 import com.clickhouse.client.api.metrics.ServerMetrics;
+import com.clickhouse.client.api.query.GenericRecord;
 import com.clickhouse.data.ClickHouseFormat;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -42,6 +47,9 @@ import org.springframework.ai.vectorstore.observation.AbstractObservationVectorS
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+
+import static com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL;
 
 /**
  * The ClickhouseVectorStore is for managing and querying vector data in a Clickhouse db.
@@ -55,23 +63,22 @@ import org.springframework.util.Assert;
  */
 public class ClickhouseVectorStore extends AbstractObservationVectorStore implements InitializingBean, AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(ClickhouseVectorStore.class);
-    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper().setSerializationInclusion(NON_NULL);
     private static final String DEFAULT_DATABASE_NAME = "ai";
     private static final String DEFAULT_TABLE_NAME = "vector_store";
     private static final String DEFAULT_ID_COLUMN_NAME = "id";
     private static final String DEFAULT_EMBEDDING_COLUMN_NAME = "embedding";
     private static final String DEFAULT_CONTENT_COLUMN_NAME = "content";
     private static final String DEFAULT_METADATA_COLUMN_NAME = "metadata";
-    private static final Similarity DEFAULT_SIMILARITY_TYPE = Similarity.COSINE;
+    private static final DistanceType DEFAULT_DISTANCE_TYPE_TYPE = DistanceType.COSINE;
     private static final boolean DEFAULT_INITIALIZE_SCHEMA = false;
     private static final long DEFAULT_TIMEOUT = 10_000L; // milliseconds
-
-    private static final Map<Similarity, VectorStoreSimilarityMetric> SIMILARITY_TYPE_MAPPING = Map.of(
-            Similarity.COSINE, VectorStoreSimilarityMetric.COSINE,
-            Similarity.L2, VectorStoreSimilarityMetric.EUCLIDEAN);
+    private static final String DISTANCE_COLUMN_NAME = "distance";
+    private static final Map<DistanceType, VectorStoreSimilarityMetric> SIMILARITY_TYPE_MAPPING = Map.of(
+            DistanceType.COSINE, VectorStoreSimilarityMetric.COSINE,
+            DistanceType.L2, VectorStoreSimilarityMetric.EUCLIDEAN);
 
     private final Client client;
-
     private final ObjectMapper objectMapper;
 
     private String databaseName;
@@ -80,7 +87,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     private String embeddingColumnName;
     private String contentColumnName;
     private String metadataColumnName;
-    private Similarity similarity;
+    private DistanceType distanceType;
     private boolean initializeSchema;
     private long timeout;
 
@@ -97,9 +104,14 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         this.embeddingColumnName = builder.embeddingColumnName;
         this.contentColumnName = builder.contentColumnName;
         this.metadataColumnName = builder.metadataColumnName;
-        this.similarity = builder.similarity;
+        this.distanceType = builder.distanceType;
         this.initializeSchema = builder.initializeSchema;
         this.timeout = builder.timeout;
+    }
+
+    @Override
+    public void close() throws Exception {
+        client.close();
     }
 
     /**
@@ -119,9 +131,10 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         List<Map<String, Object>> dtos = new ArrayList<>();
         for (Document document : documents) {
             Map<String, Object> dto = Map.of(
-                    idColumnName, document.getId(),
-                    embeddingColumnName, EmbeddingUtils.toList(embeddings.get(documents.indexOf(document))),
-                    contentColumnName, document.getText());
+                    this.idColumnName, document.getId(),
+                    this.embeddingColumnName, EmbeddingUtils.toList(embeddings.get(documents.indexOf(document))),
+                    this.contentColumnName, document.getText(),
+                    this.metadataColumnName, document.getMetadata());
             dtos.add(dto);
         }
 
@@ -129,7 +142,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         InputStream inputStream = new ByteArrayInputStream(json);
 
         try (InsertResponse response =
-                client.insert(tableName, inputStream, ClickHouseFormat.JSON).get(timeout, TimeUnit.MILLISECONDS)) {
+                client.insert(this.getFullTableName(), inputStream, ClickHouseFormat.JSON).get(timeout, TimeUnit.MILLISECONDS)) {
             if (logger.isDebugEnabled()) {
                 logger.debug(
                         "Insert finished: {} rows added",
@@ -142,17 +155,86 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         }
     }
 
+    private byte[] toJson(List<Map<String, Object>> dataList) {
+        try {
+            return objectMapper.writeValueAsBytes(dataList);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Conversion from Object to JSON failed", ex);
+        }
+    }
+
     @Override
     public void doDelete(List<String> idList) {
-        client.execute(String.format(
-                "DELETE FROM %s.%s WHERE %s IN (%s)",
-                databaseName, tableName, idColumnName, String.join(", ", idList)));
+        if (idList == null || idList.isEmpty()) {
+            return;
+        }
+        client.execute(String.format("DELETE FROM %s WHERE %s IN (%s)",
+                this.getFullTableName(),
+                idColumnName,
+                idList.stream()
+                        .map(str -> "'"+str+"'")
+                        .collect(Collectors.joining(","))
+        ));
     }
 
     @Override
     public List<Document> doSimilaritySearch(SearchRequest request) {
-        // TODO implement
-        return null;
+        String searchQuery = this.buildSearchQuery(request);
+        float[] embedding = this.embeddingModel.embed(request.getQuery());
+        Map<String, Object> sqlQueryParams = Map.of(
+                "embedding", Arrays.toString(embedding),
+                "similarityThreshold", request.getSimilarityThreshold(),
+                "topK", request.getTopK()
+        );
+        try (var records = client.queryRecords(searchQuery, sqlQueryParams).get(this.timeout, TimeUnit.MILLISECONDS)) {
+            List<Document> documents = new ArrayList<>();
+            records.forEach(record -> documents.add(mapRecordToDocument(record)));
+            return documents;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String buildSearchQuery(SearchRequest request) {
+        String filteringClause = "";
+        if (request.hasFilterExpression()) {
+            // TODO: Support filtering
+//            filteringClause = String.format("AND %s", request.getFilterExpression());
+        }
+        String queryTemplate = """
+                WITH {embedding:Array(Float32)} AS reference_vector
+                SELECT *, %s(%s, reference_vector) as %s
+                FROM %s
+                WHERE distance >= {similarityThreshold:Float64}
+                  %s
+                ORDER BY distance
+                LIMIT {topK:UInt32}
+                """;
+        return String.format(queryTemplate,
+                this.distanceType.getFunctionName(),
+                this.embeddingColumnName,
+                DISTANCE_COLUMN_NAME,
+                this.getFullTableName(),
+                filteringClause);
+    }
+
+    private Document mapRecordToDocument(GenericRecord record) {
+        return Document.builder()
+                .id(record.getString(this.idColumnName))
+                .text(record.getString(this.contentColumnName))
+                .metadata(filter((Map<String, Object>) record.getObject(this.metadataColumnName)))
+                .score(1.0 - record.getDouble(DISTANCE_COLUMN_NAME))
+                .build();
+    }
+
+    private Map<String, Object> filter(Map<String, Object> sourceMap) {
+        Map<String, Object> filteredMap = new HashMap<>();
+        for (Map.Entry<String, Object> entry : sourceMap.entrySet()) {
+            if (entry.getValue() != null) {
+                filteredMap.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return filteredMap;
     }
 
     @Override
@@ -166,10 +248,10 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     }
 
     private String getSimilarityMetric() {
-        if (!SIMILARITY_TYPE_MAPPING.containsKey(this.similarity)) {
-            return this.similarity.name();
+        if (!SIMILARITY_TYPE_MAPPING.containsKey(this.distanceType)) {
+            return this.distanceType.name();
         }
-        return SIMILARITY_TYPE_MAPPING.get(this.similarity).value();
+        return SIMILARITY_TYPE_MAPPING.get(this.distanceType).value();
     }
 
     @Override
@@ -187,23 +269,21 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     private void createTable() {
         String queryTemplate =
                 """
-                CREATE TABLE IF NOT EXISTS %s.%s
+                CREATE TABLE IF NOT EXISTS %s
                 (
                         %s String,           -- id
-                        %s Nullable(String), -- content
+                        %s String,           -- content
                         %s Array(Float64),   -- embedding
-                        %s JSON              -- metadata
-                        CONSTRAINT embedding_dimension CHECK length(%s) = %d,"
-                        INDEX annoy_embedding_idx %s TYPE vector_similarity('hnsw', '%s', %d)"
+                        %s JSON,             -- metadata
+                        CONSTRAINT embedding_dimension CHECK length(%s) = %d,
+                        INDEX annoy_embedding_idx %s TYPE vector_similarity('hnsw', '%s', %d)
                 )
                 ENGINE = MergeTree
                 ORDER BY id
                 """;
 
-        client.execute(String.format(
-                "queryTemplate",
-                this.databaseName,
-                this.tableName,
+        client.execute(String.format(queryTemplate,
+                this.getFullTableName(),
                 this.idColumnName,
                 this.contentColumnName,
                 this.embeddingColumnName,
@@ -211,34 +291,28 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                 this.embeddingColumnName,
                 this.embeddingModel.dimensions(),
                 this.embeddingColumnName,
-                this.similarity.getName(),
-                this.embeddingModel.dimensions()));
+                this.distanceType.getFunctionName(),
+                this.embeddingModel.dimensions()
+        ));
     }
 
-    @Override
-    public void close() throws Exception {
-        client.close();
+    private String getFullTableName() {
+        return StringUtils.hasLength(this.databaseName)
+                ? this.databaseName + "." + this.tableName
+                : this.tableName;
     }
 
-    private byte[] toJson(List<Map<String, Object>> dataList) {
-        try {
-            return objectMapper.writeValueAsBytes(dataList);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("Conversion from Object to JSON failed", ex);
-        }
-    }
-
-    public enum Similarity {
+    public enum DistanceType {
         COSINE("cosineDistance"),
         L2("L2Distance");
 
         private String name;
 
-        Similarity(String name) {
+        DistanceType(String name) {
             this.name = name;
         }
 
-        public String getName() {
+        public String getFunctionName() {
             return name;
         }
     }
@@ -257,7 +331,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         private String embeddingColumnName = DEFAULT_EMBEDDING_COLUMN_NAME;
         private String contentColumnName = DEFAULT_CONTENT_COLUMN_NAME;
         private String metadataColumnName = DEFAULT_METADATA_COLUMN_NAME;
-        private Similarity similarity = DEFAULT_SIMILARITY_TYPE;
+        private DistanceType distanceType = DEFAULT_DISTANCE_TYPE_TYPE;
         private boolean initializeSchema = DEFAULT_INITIALIZE_SCHEMA;
 
         private Builder(Client client, EmbeddingModel embeddingModel) {
@@ -300,8 +374,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
             return this;
         }
 
-        public Builder similarity(Similarity similarity) {
-            this.similarity = similarity;
+        public Builder distanceType(DistanceType distanceType) {
+            this.distanceType = distanceType;
             return this;
         }
 

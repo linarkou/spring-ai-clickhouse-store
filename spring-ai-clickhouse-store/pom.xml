@@ -41,17 +41,15 @@
         </dependency>
 
         <!-- TESTING -->
-        <!--		<dependency>-->
-        <!--			<groupId>org.springframework.ai</groupId>-->
-        <!--			<artifactId>spring-ai-transformers</artifactId>-->
-        <!--			<version>${project.parent.version}</version>-->
-        <!--			<scope>test</scope>-->
-        <!--		</dependency>-->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-transformers</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-test</artifactId>
-            <version>${project.parent.version}</version>
             <scope>test</scope>
         </dependency>
 
