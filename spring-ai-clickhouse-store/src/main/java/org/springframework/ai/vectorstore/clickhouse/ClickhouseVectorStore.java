@@ -217,7 +217,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         String queryTemplate =
                 """
                 WITH {embedding:Array(Float32)} AS reference_vector
-                SELECT *, %s(%s, reference_vector) as %s
+                SELECT %s, %s, %s, %s(%s, reference_vector) as %s
                 FROM %s
                 WHERE distance >= {similarityThreshold:Float64}
                   %s
@@ -226,6 +226,9 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                 """;
         return String.format(
                 queryTemplate,
+                this.idColumnName,
+                this.contentColumnName,
+                this.metadataColumnName,
                 this.distanceType.getFunctionName(),
                 this.embeddingColumnName,
                 DISTANCE_COLUMN_NAME,
@@ -294,7 +297,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                         INDEX annoy_embedding_idx %s TYPE vector_similarity('hnsw', '%s', %d)
                 )
                 ENGINE = MergeTree
-                ORDER BY id
+                ORDER BY %s
                 """;
 
         client.execute(String.format(
@@ -308,7 +311,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                 this.embeddingModel.dimensions(),
                 this.embeddingColumnName,
                 this.distanceType.getFunctionName(),
-                this.embeddingModel.dimensions()));
+                this.embeddingModel.dimensions(),
+                this.idColumnName));
     }
 
     private String getFullTableName() {
