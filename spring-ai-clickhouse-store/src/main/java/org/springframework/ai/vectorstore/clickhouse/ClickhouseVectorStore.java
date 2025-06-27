@@ -16,6 +16,8 @@
 
 package org.springframework.ai.vectorstore.clickhouse;
 
+import static com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL;
+
 import com.clickhouse.client.api.Client;
 import com.clickhouse.client.api.insert.InsertResponse;
 import com.clickhouse.client.api.metrics.ServerMetrics;
@@ -32,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -43,13 +44,12 @@ import org.springframework.ai.observation.conventions.VectorStoreSimilarityMetri
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
-
-import static com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL;
 
 /**
  * The ClickhouseVectorStore is for managing and querying vector data in a Clickhouse db.
@@ -90,6 +90,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     private DistanceType distanceType;
     private boolean initializeSchema;
     private long timeout;
+    private ClickhouseFilterExpressionConverter filterExpressionConverter;
 
     protected ClickhouseVectorStore(Builder builder) {
         super(builder);
@@ -107,6 +108,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         this.distanceType = builder.distanceType;
         this.initializeSchema = builder.initializeSchema;
         this.timeout = builder.timeout;
+        this.filterExpressionConverter = new ClickhouseFilterExpressionConverter(this.metadataColumnName);
     }
 
     @Override
@@ -141,8 +143,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         byte[] json = toJson(dtos);
         InputStream inputStream = new ByteArrayInputStream(json);
 
-        try (InsertResponse response =
-                client.insert(this.getFullTableName(), inputStream, ClickHouseFormat.JSON).get(timeout, TimeUnit.MILLISECONDS)) {
+        try (InsertResponse response = client.insert(this.getFullTableName(), inputStream, ClickHouseFormat.JSON)
+                .get(timeout, TimeUnit.MILLISECONDS)) {
             if (logger.isDebugEnabled()) {
                 logger.debug(
                         "Insert finished: {} rows added",
@@ -168,13 +170,26 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         if (idList == null || idList.isEmpty()) {
             return;
         }
-        client.execute(String.format("DELETE FROM %s WHERE %s IN (%s)",
+        client.execute(String.format(
+                "DELETE FROM %s WHERE %s IN (%s)",
                 this.getFullTableName(),
                 idColumnName,
-                idList.stream()
-                        .map(str -> "'"+str+"'")
-                        .collect(Collectors.joining(","))
-        ));
+                idList.stream().map(str -> "'" + str + "'").collect(Collectors.joining(","))));
+    }
+
+    @Override
+    protected void doDelete(Filter.Expression filterExpression) {
+        Assert.notNull(filterExpression, "Filter expression must not be null");
+
+        try {
+            String nativeFilterExpression = this.filterExpressionConverter.convertExpression(filterExpression);
+            String sql = String.format("DELETE FROM %s WHERE %s", getFullTableName(), nativeFilterExpression);
+            logger.debug("Executing delete with filter: {}", sql);
+            this.client.execute(sql);
+        } catch (Exception e) {
+            logger.error("Failed to delete documents by filter: {}", e.getMessage(), e);
+            throw new IllegalStateException("Failed to delete documents by filter", e);
+        }
     }
 
     @Override
@@ -184,8 +199,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         Map<String, Object> sqlQueryParams = Map.of(
                 "embedding", Arrays.toString(embedding),
                 "similarityThreshold", request.getSimilarityThreshold(),
-                "topK", request.getTopK()
-        );
+                "topK", request.getTopK());
         try (var records = client.queryRecords(searchQuery, sqlQueryParams).get(this.timeout, TimeUnit.MILLISECONDS)) {
             List<Document> documents = new ArrayList<>();
             records.forEach(record -> documents.add(mapRecordToDocument(record)));
@@ -198,10 +212,10 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     private String buildSearchQuery(SearchRequest request) {
         String filteringClause = "";
         if (request.hasFilterExpression()) {
-            // TODO: Support filtering
-//            filteringClause = String.format("AND %s", request.getFilterExpression());
+            filteringClause = this.filterExpressionConverter.convertExpression(request.getFilterExpression());
         }
-        String queryTemplate = """
+        String queryTemplate =
+                """
                 WITH {embedding:Array(Float32)} AS reference_vector
                 SELECT *, %s(%s, reference_vector) as %s
                 FROM %s
@@ -210,7 +224,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                 ORDER BY distance
                 LIMIT {topK:UInt32}
                 """;
-        return String.format(queryTemplate,
+        return String.format(
+                queryTemplate,
                 this.distanceType.getFunctionName(),
                 this.embeddingColumnName,
                 DISTANCE_COLUMN_NAME,
@@ -282,7 +297,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                 ORDER BY id
                 """;
 
-        client.execute(String.format(queryTemplate,
+        client.execute(String.format(
+                queryTemplate,
                 this.getFullTableName(),
                 this.idColumnName,
                 this.contentColumnName,
@@ -292,14 +308,11 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
                 this.embeddingModel.dimensions(),
                 this.embeddingColumnName,
                 this.distanceType.getFunctionName(),
-                this.embeddingModel.dimensions()
-        ));
+                this.embeddingModel.dimensions()));
     }
 
     private String getFullTableName() {
-        return StringUtils.hasLength(this.databaseName)
-                ? this.databaseName + "." + this.tableName
-                : this.tableName;
+        return StringUtils.hasLength(this.databaseName) ? this.databaseName + "." + this.tableName : this.tableName;
     }
 
     public enum DistanceType {
