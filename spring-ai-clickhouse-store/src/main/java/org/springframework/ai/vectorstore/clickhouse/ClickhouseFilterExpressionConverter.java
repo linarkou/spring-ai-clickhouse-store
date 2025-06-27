@@ -1,5 +1,8 @@
 package org.springframework.ai.vectorstore.clickhouse;
 
+import static org.springframework.ai.vectorstore.filter.Filter.ExpressionType.EQ;
+import static org.springframework.ai.vectorstore.filter.Filter.ExpressionType.NE;
+
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.converter.AbstractFilterExpressionConverter;
 
@@ -13,8 +16,19 @@ public class ClickhouseFilterExpressionConverter extends AbstractFilterExpressio
     @Override
     protected void doExpression(Filter.Expression expression, StringBuilder context) {
         this.convertOperand(expression.left(), context);
-        context.append(getOperationSymbol(expression));
-        this.convertOperand(expression.right(), context);
+        if ((EQ.equals(expression.type()) || NE.equals(expression.type()))
+                && expression.right() instanceof Filter.Value rightExpressionValue
+                && rightExpressionValue.value() == null) {
+            // if the right operand is null, we need to use the IS (NOT) NULL operator
+            if (EQ.equals(expression.type())) {
+                context.append(" IS NULL");
+            } else if (NE.equals(expression.type())) {
+                context.append(" IS NOT NULL");
+            }
+        } else {
+            context.append(getOperationSymbol(expression));
+            this.convertOperand(expression.right(), context);
+        }
     }
 
     @Override
@@ -67,6 +81,16 @@ public class ClickhouseFilterExpressionConverter extends AbstractFilterExpressio
 
     @Override
     protected void doEndGroup(Filter.Group group, StringBuilder context) {
+        context.append(")");
+    }
+
+    @Override
+    protected void doStartValueRange(Filter.Value listValue, StringBuilder context) {
+        context.append("(");
+    }
+
+    @Override
+    protected void doEndValueRange(Filter.Value listValue, StringBuilder context) {
         context.append(")");
     }
 }

@@ -212,7 +212,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     private String buildSearchQuery(SearchRequest request) {
         String filteringClause = "";
         if (request.hasFilterExpression()) {
-            filteringClause = this.filterExpressionConverter.convertExpression(request.getFilterExpression());
+            filteringClause =
+                    "AND (" + this.filterExpressionConverter.convertExpression(request.getFilterExpression()) + ")";
         }
         String queryTemplate =
                 """
