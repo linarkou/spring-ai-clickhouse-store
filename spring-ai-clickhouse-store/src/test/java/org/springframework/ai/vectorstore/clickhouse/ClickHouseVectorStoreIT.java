@@ -41,8 +41,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+/**
+ * @author Linar Abzaltdinov
+ */
 @Testcontainers
-class ClickhouseVectorStoreIT extends BaseVectorStoreTests {
+class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
 
     @Container
     static ClickHouseContainer clickHouseContainer = new ClickHouseContainer(
@@ -87,7 +90,7 @@ class ClickhouseVectorStoreIT extends BaseVectorStoreTests {
     @Test
     void testInitializationWithCustomNames() {
         this.contextRunner.run(context -> {
-            ClickhouseVectorStore clickhouseVectorStore = createClickHouseVectorStoreBuilder(context)
+            ClickHouseVectorStore clickhouseVectorStore = createClickHouseVectorStoreBuilder(context)
                     .databaseName("test_db_name")
                     .tableName("test_table")
                     .idColumnName("test_id")
@@ -184,7 +187,7 @@ class ClickhouseVectorStoreIT extends BaseVectorStoreTests {
     void testSimilaritySearchWithFilters(
             Filter.Expression filterExpression, String nativeFilterExpression, List<String> expectedIds) {
         this.contextRunner.withUserConfiguration(VectorStoreConfiguration.class).run(context -> {
-            ClickhouseVectorStore clickhouseVectorStore = context.getBean(ClickhouseVectorStore.class);
+            ClickHouseVectorStore clickhouseVectorStore = context.getBean(ClickHouseVectorStore.class);
 
             List<Document> originalDocuments = documents();
             clickhouseVectorStore.doAdd(originalDocuments);
@@ -219,12 +222,12 @@ class ClickhouseVectorStoreIT extends BaseVectorStoreTests {
         });
     }
 
-    private static ClickhouseVectorStore createClickHouseVectorStore(ApplicationContext context) {
+    private static ClickHouseVectorStore createClickHouseVectorStore(ApplicationContext context) {
         return createClickHouseVectorStoreBuilder(context).build();
     }
 
-    private static ClickhouseVectorStore.Builder createClickHouseVectorStoreBuilder(ApplicationContext context) {
-        return ClickhouseVectorStore.builder(context.getBean(Client.class), context.getBean(EmbeddingModel.class));
+    private static ClickHouseVectorStore.Builder createClickHouseVectorStoreBuilder(ApplicationContext context) {
+        return ClickHouseVectorStore.builder(context.getBean(Client.class), context.getBean(EmbeddingModel.class));
     }
 
     private static String toString(double[] array) {
@@ -265,8 +268,8 @@ class ClickhouseVectorStoreIT extends BaseVectorStoreTests {
 
         @Bean
         public VectorStore vectorStore(Client clickHouseClient, EmbeddingModel embeddingModel) {
-            return ClickhouseVectorStore.builder(clickHouseClient, embeddingModel)
-                    .distanceType(ClickhouseVectorStore.DistanceType.COSINE)
+            return ClickHouseVectorStore.builder(clickHouseClient, embeddingModel)
+                    .distanceType(ClickHouseVectorStore.DistanceType.COSINE)
                     .initializeSchema(true)
                     .build();
         }

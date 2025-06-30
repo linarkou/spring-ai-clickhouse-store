@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.spring-ai-community</groupId>
+        <artifactId>spring-ai-clickhouse-store-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>spring-ai-starter-vector-store-clickhouse</artifactId>
+    <packaging>jar</packaging>
+    <name>Spring AI Starter - ClickHouse Vector Store</name>
+    <description>Spring AI ClickHouse Vector Store Starter</description>
+    <url>https://github.com/linarkou/spring-ai-clickhouse-store</url>
+
+    <scm>
+        <url>https://github.com/linarkou/spring-ai-clickhouse-store</url>
+        <connection>git://github.com/linarkou/spring-ai-clickhouse-store.git</connection>
+        <developerConnection>git@github.com:linarkou/spring-ai-clickhouse-store.git</developerConnection>
+    </scm>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.spring-ai-community</groupId>
+            <artifactId>spring-ai-autoconfigure-vector-store-clickhouse</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-autoconfigure-vector-store-observation</artifactId>
+            <version>${spring-ai.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.spring-ai-community</groupId>
+            <artifactId>spring-ai-clickhouse-store</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

@@ -15,8 +15,8 @@
 
     <modules>
         <module>spring-ai-clickhouse-store</module>
-<!--        <module>spring-ai-autoconfigure-vector-store-clickhouse</module>-->
-<!--        <module>spring-ai-starter-vector-store-clickhouse</module>-->
+        <module>spring-ai-autoconfigure-vector-store-clickhouse</module>
+        <module>spring-ai-starter-vector-store-clickhouse</module>
     </modules>
 
     <scm>
@@ -24,6 +24,7 @@
         <connection>git://github.com/linarkou/spring-ai-clickhouse-store.git</connection>
         <developerConnection>git@github.com:linarkou/spring-ai-clickhouse-store.git</developerConnection>
     </scm>
+
     <licenses>
         <license>
             <name>Apache 2.0</name>
@@ -31,6 +32,7 @@
             <distribution>repo</distribution>
         </license>
     </licenses>
+
     <developers>
         <developer>
             <name>Linar Abzaltdinov</name>
@@ -69,16 +71,18 @@
                 <artifactId>client-v2</artifactId>
                 <version>${clickhouse.version}</version>
             </dependency>
+            <dependency>
+                <groupId>io.github.spring-ai-community</groupId>
+                <artifactId>spring-ai-clickhouse-store</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.spring-ai-community</groupId>
+                <artifactId>spring-ai-autoconfigure-vector-store-clickhouse</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
-
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
 
     <build>
         <finalName>${project.artifactId}</finalName>
@@ -118,6 +122,26 @@
                         <goals>
                             <goal>jar</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.5.3</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Запускает все *IT.java -->
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

@@ -6,10 +6,15 @@ import static org.springframework.ai.vectorstore.filter.Filter.ExpressionType.NE
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.converter.AbstractFilterExpressionConverter;
 
-public class ClickhouseFilterExpressionConverter extends AbstractFilterExpressionConverter {
+/**
+ * Converts {@link Filter.Expression} into Clickhouse JSON metadata filter expression format.
+ *
+ * @author Linar Abzaltdinov
+ */
+public class ClickHouseFilterExpressionConverter extends AbstractFilterExpressionConverter {
     private String metadataColumnName;
 
-    public ClickhouseFilterExpressionConverter(String metadataColumnName) {
+    public ClickHouseFilterExpressionConverter(String metadataColumnName) {
         this.metadataColumnName = metadataColumnName;
     }
 

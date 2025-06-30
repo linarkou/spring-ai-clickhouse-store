@@ -61,22 +61,24 @@ import org.springframework.util.StringUtils;
  * @see EmbeddingModel
  * @since 1.0.0
  */
-public class ClickhouseVectorStore extends AbstractObservationVectorStore implements InitializingBean, AutoCloseable {
-    private static final Logger logger = LoggerFactory.getLogger(ClickhouseVectorStore.class);
+public class ClickHouseVectorStore extends AbstractObservationVectorStore implements InitializingBean, AutoCloseable {
+    private static final Logger logger = LoggerFactory.getLogger(ClickHouseVectorStore.class);
     private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper().setSerializationInclusion(NON_NULL);
-    private static final String DEFAULT_DATABASE_NAME = "ai";
-    private static final String DEFAULT_TABLE_NAME = "vector_store";
-    private static final String DEFAULT_ID_COLUMN_NAME = "id";
-    private static final String DEFAULT_EMBEDDING_COLUMN_NAME = "embedding";
-    private static final String DEFAULT_CONTENT_COLUMN_NAME = "content";
-    private static final String DEFAULT_METADATA_COLUMN_NAME = "metadata";
-    private static final DistanceType DEFAULT_DISTANCE_TYPE_TYPE = DistanceType.COSINE;
-    private static final boolean DEFAULT_INITIALIZE_SCHEMA = false;
-    private static final long DEFAULT_TIMEOUT = 10_000L; // milliseconds
-    private static final String DISTANCE_COLUMN_NAME = "distance";
     private static final Map<DistanceType, VectorStoreSimilarityMetric> SIMILARITY_TYPE_MAPPING = Map.of(
             DistanceType.COSINE, VectorStoreSimilarityMetric.COSINE,
             DistanceType.L2, VectorStoreSimilarityMetric.EUCLIDEAN);
+
+    public static final String CLICKHOUSE_VECTOR_STORE = "clickhouse";
+    public static final String DEFAULT_DATABASE_NAME = "ai";
+    public static final String DEFAULT_TABLE_NAME = "vector_store";
+    public static final String DEFAULT_ID_COLUMN_NAME = "id";
+    public static final String DEFAULT_EMBEDDING_COLUMN_NAME = "embedding";
+    public static final String DEFAULT_CONTENT_COLUMN_NAME = "content";
+    public static final String DEFAULT_METADATA_COLUMN_NAME = "metadata";
+    public static final DistanceType DEFAULT_DISTANCE_TYPE = DistanceType.COSINE;
+    public static final boolean DEFAULT_INITIALIZE_SCHEMA = false;
+    public static final long DEFAULT_TIMEOUT = 10_000L; // milliseconds
+    public static final String DISTANCE_COLUMN_NAME = "distance";
 
     private final Client client;
     private final ObjectMapper objectMapper;
@@ -90,9 +92,9 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
     private DistanceType distanceType;
     private boolean initializeSchema;
     private long timeout;
-    private ClickhouseFilterExpressionConverter filterExpressionConverter;
+    private ClickHouseFilterExpressionConverter filterExpressionConverter;
 
-    protected ClickhouseVectorStore(Builder builder) {
+    protected ClickHouseVectorStore(Builder builder) {
         super(builder);
 
         Assert.notNull(builder.client, "ClickHouse client must not be null");
@@ -108,7 +110,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         this.distanceType = builder.distanceType;
         this.initializeSchema = builder.initializeSchema;
         this.timeout = builder.timeout;
-        this.filterExpressionConverter = new ClickhouseFilterExpressionConverter(this.metadataColumnName);
+        this.filterExpressionConverter = new ClickHouseFilterExpressionConverter(this.metadataColumnName);
     }
 
     @Override
@@ -241,9 +243,15 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         return Document.builder()
                 .id(record.getString(this.idColumnName))
                 .text(record.getString(this.contentColumnName))
-                .metadata(filter((Map<String, Object>) record.getObject(this.metadataColumnName)))
+                .metadata(getMetadata(record))
                 .score(1.0 - record.getDouble(DISTANCE_COLUMN_NAME))
                 .build();
+    }
+
+    private Map<String, Object> getMetadata(GenericRecord record) {
+        Map<String, Object> filteredMetadata = filter((Map<String, Object>) record.getObject(this.metadataColumnName));
+        filteredMetadata.put(DISTANCE_COLUMN_NAME, 1.0 - record.getDouble(DISTANCE_COLUMN_NAME));
+        return filteredMetadata;
     }
 
     private Map<String, Object> filter(Map<String, Object> sourceMap) {
@@ -258,7 +266,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
 
     @Override
     public VectorStoreObservationContext.Builder createObservationContextBuilder(String operationName) {
-        return VectorStoreObservationContext.builder("CLICKHOUSE", operationName)
+        return VectorStoreObservationContext.builder(CLICKHOUSE_VECTOR_STORE, operationName)
                 .namespace(this.databaseName)
                 .collectionName(this.tableName)
                 .fieldName(this.embeddingColumnName)
@@ -349,7 +357,7 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         private String embeddingColumnName = DEFAULT_EMBEDDING_COLUMN_NAME;
         private String contentColumnName = DEFAULT_CONTENT_COLUMN_NAME;
         private String metadataColumnName = DEFAULT_METADATA_COLUMN_NAME;
-        private DistanceType distanceType = DEFAULT_DISTANCE_TYPE_TYPE;
+        private DistanceType distanceType = DEFAULT_DISTANCE_TYPE;
         private boolean initializeSchema = DEFAULT_INITIALIZE_SCHEMA;
 
         private Builder(Client client, EmbeddingModel embeddingModel) {
@@ -408,8 +416,8 @@ public class ClickhouseVectorStore extends AbstractObservationVectorStore implem
         }
 
         @Override
-        public ClickhouseVectorStore build() {
-            return new ClickhouseVectorStore(this);
+        public ClickHouseVectorStore build() {
+            return new ClickHouseVectorStore(this);
         }
     }
 }
