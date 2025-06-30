@@ -39,7 +39,7 @@ public class ClickHouseClientProperties extends CommonVectorStoreProperties {
 
     private String defaultDatabaseName;
 
-    private Boolean sslAuthentication;
+    private Boolean sslAuthentication = false;
 
     private String sslTrustStorePath;
     private String sslTrustStorePassword;
@@ -52,7 +52,6 @@ public class ClickHouseClientProperties extends CommonVectorStoreProperties {
     private Duration connectTimeout;
     private Duration connectionRequestTimeout;
     private Duration connectionTtl;
-    private Duration keepAliveTimeout;
     private Duration socketTimeout;
     private Duration executionTimeout;
 
@@ -188,14 +187,6 @@ public class ClickHouseClientProperties extends CommonVectorStoreProperties {
 
     public void setConnectionTtl(Duration connectionTtl) {
         this.connectionTtl = connectionTtl;
-    }
-
-    public Duration getKeepAliveTimeout() {
-        return keepAliveTimeout;
-    }
-
-    public void setKeepAliveTimeout(Duration keepAliveTimeout) {
-        this.keepAliveTimeout = keepAliveTimeout;
     }
 
     public Duration getSocketTimeout() {
