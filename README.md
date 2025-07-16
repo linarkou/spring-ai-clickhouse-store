@@ -118,7 +118,7 @@ Properties starting with `spring.ai.vectorstore.clickhouse.*` are used to config
 | `spring.ai.vectorstore.clickhouse.client.password`                   | Password for authentication with server                                           | -
 | `spring.ai.vectorstore.clickhouse.client.access-token`               | Access token for authentication with server                                       | -
 | `spring.ai.vectorstore.clickhouse.client.default-database-name`      | The default database name that will be used by operations if not specified        | -
-| `spring.ai.vectorstore.clickhouse.client.ssl-authentication`         | Whether to use SSL Client Certificate to authenticate with server                 | false
+| `spring.ai.vectorstore.clickhouse.client.ssl-authentication`         | Whether to use SSL Client Certificate to authenticate with server                 | -
 | `spring.ai.vectorstore.clickhouse.client.ssl-trust-store-path`       | Path to the trust store file. Cannot be combined with certificates                | -
 | `spring.ai.vectorstore.clickhouse.client.ssl-trust-store-password`   | Password for the SSL Trust Store                                                  | -
 | `spring.ai.vectorstore.clickhouse.client.ssl-trust-store-type`       | Type of the SSL Trust Store (JKS / PKCS12)                                        | -

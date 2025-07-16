@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2024 the original author or authors.
+ * Copyright 2025 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,7 @@
 package org.springframework.ai.vectorstore.clickhouse.autoconfigure;
 
 import com.clickhouse.client.api.Client;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
-import java.time.temporal.ChronoUnit;
-import java.util.function.Consumer;
 import org.springframework.ai.embedding.BatchingStrategy;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.TokenCountBatchingStrategy;
@@ -35,14 +31,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
-import org.springframework.util.CollectionUtils;
 
 /**
  * {@link AutoConfiguration Auto-configuration} for ClickHouse Vector Store.
  *
  * @author Linar Abzaltdinov
  */
-@AutoConfiguration
+@AutoConfiguration(after = ClickHouseClientAutoConfiguration.class)
 @ConditionalOnClass({EmbeddingModel.class, Client.class, ClickHouseVectorStore.class})
 @EnableConfigurationProperties({ClickHouseVectorStoreProperties.class, ClickHouseClientProperties.class})
 @ConditionalOnProperty(
@@ -81,63 +76,5 @@ public class ClickHouseVectorStoreAutoConfiguration {
                 .batchingStrategy(batchingStrategy);
 
         return builder.build();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public Client clickHouseClient(
-            ClickHouseClientProperties properties, ObjectProvider<MeterRegistry> meterRegistryProvider) {
-        var clientBuilder = new Client.Builder();
-        properties.getEndpoints().forEach(clientBuilder::addEndpoint);
-        setIfNotNull(properties.getUsername(), clientBuilder::setUsername);
-        setIfNotNull(properties.getPassword(), clientBuilder::setPassword);
-        setIfNotNull(properties.getAccessToken(), clientBuilder::setAccessToken);
-        setIfNotNull(properties.getDefaultDatabaseName(), clientBuilder::setDefaultDatabase);
-        setIfNotNull(properties.getSslAuthentication(), clientBuilder::useSSLAuthentication);
-        setIfNotNull(properties.getSslTrustStorePath(), clientBuilder::setSSLTrustStore);
-        setIfNotNull(properties.getSslTrustStorePassword(), clientBuilder::setSSLTrustStorePassword);
-        setIfNotNull(properties.getSslTrustStoreType(), clientBuilder::setSSLTrustStoreType);
-        setIfNotNull(properties.getRootCertificatePath(), clientBuilder::setRootCertificate);
-        setIfNotNull(properties.getClientCertificatePath(), clientBuilder::setClientCertificate);
-        setIfNotNull(properties.getClientKeyPath(), clientBuilder::setClientKey);
-        setIfNotNull(properties.getConnectTimeout(), timeout -> clientBuilder.setConnectTimeout(timeout.toMillis()));
-        setIfNotNull(
-                properties.getConnectionRequestTimeout(),
-                timeout -> clientBuilder.setConnectionRequestTimeout(timeout.toMillis(), ChronoUnit.MILLIS));
-        setIfNotNull(
-                properties.getConnectionTtl(),
-                timeout -> clientBuilder.setConnectionTTL(timeout.toMillis(), ChronoUnit.MILLIS));
-        setIfNotNull(
-                properties.getKeepAliveTimeout(),
-                timeout -> clientBuilder.setKeepAliveTimeout(timeout.toMillis(), ChronoUnit.MILLIS));
-        setIfNotNull(
-                properties.getSocketTimeout(),
-                timeout -> clientBuilder.setSocketTimeout(timeout.toMillis(), ChronoUnit.MILLIS));
-        setIfNotNull(
-                properties.getExecutionTimeout(),
-                timeout -> clientBuilder.setExecutionTimeout(timeout.toMillis(), ChronoUnit.MILLIS));
-        setIfNotNull(
-                properties.getExecutionTimeout(),
-                timeout -> clientBuilder.setExecutionTimeout(timeout.toMillis(), ChronoUnit.MILLIS));
-        if (properties.isUseMeterRegistry()) {
-            MeterRegistry meterRegistry = meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new);
-            clientBuilder.registerClientMetrics(meterRegistry, properties.getMetricsGroupName());
-        }
-        if (!CollectionUtils.isEmpty(properties.getHttpHeaders())) {
-            clientBuilder.httpHeaders(properties.getHttpHeaders());
-        }
-        if (!CollectionUtils.isEmpty(properties.getServerSettings())) {
-            properties.getServerSettings().forEach(clientBuilder::serverSetting);
-        }
-        if (!CollectionUtils.isEmpty(properties.getOptions())) {
-            clientBuilder.setOptions(properties.getOptions());
-        }
-        return clientBuilder.build();
-    }
-
-    private <T> void setIfNotNull(T value, Consumer<T> setter) {
-        if (value != null) {
-            setter.accept(value);
-        }
     }
 }
