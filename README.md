@@ -15,7 +15,7 @@ add the following dependency to your project's Maven `pom.xml` file:
 
 ```xml
 <dependency>
-    <groupId>org.springaicommunity</groupId>
+    <groupId>io.github.linarkou</groupId>
     <artifactId>spring-ai-starter-vector-store-clickhouse</artifactId>
 </dependency>
 ```
@@ -24,7 +24,7 @@ or to your Gradle `build.gradle` build file.
 
 ```groovy
 dependencies {
-    implementation 'org.springaicommunity:spring-ai-starter-vector-store-clickhouse'
+    implementation 'io.github.linarkou:spring-ai-starter-vector-store-clickhouse'
 }
 ```
 
