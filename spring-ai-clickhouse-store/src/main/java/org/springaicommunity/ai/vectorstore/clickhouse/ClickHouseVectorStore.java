@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.springframework.ai.vectorstore.clickhouse;
+package org.springaicommunity.ai.vectorstore.clickhouse;
 
 import static com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL;
 

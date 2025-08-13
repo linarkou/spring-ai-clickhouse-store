@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.springframework.ai.vectorstore.clickhouse.autoconfigure;
+package org.springaicommunity.ai.vectorstore.clickhouse.autoconfigure;
 
 import com.clickhouse.client.api.Client;
 import io.micrometer.core.instrument.MeterRegistry;

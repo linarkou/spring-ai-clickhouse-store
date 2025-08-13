@@ -1,4 +1,4 @@
-package org.springframework.ai.vectorstore.clickhouse;
+package org.springaicommunity.ai.vectorstore.clickhouse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

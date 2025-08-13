@@ -1,2 +1,2 @@
-org.springframework.ai.vectorstore.clickhouse.autoconfigure.ClickHouseClientAutoConfiguration
-org.springframework.ai.vectorstore.clickhouse.autoconfigure.ClickHouseVectorStoreAutoConfiguration
+org.springaicommunity.ai.vectorstore.clickhouse.autoconfigure.ClickHouseClientAutoConfiguration
+org.springaicommunity.ai.vectorstore.clickhouse.autoconfigure.ClickHouseVectorStoreAutoConfiguration

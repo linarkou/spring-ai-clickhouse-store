@@ -1,4 +1,4 @@
-package org.springframework.ai.vectorstore.clickhouse;
+package org.springaicommunity.ai.vectorstore.clickhouse;
 
 import static org.springframework.ai.vectorstore.filter.Filter.ExpressionType.EQ;
 import static org.springframework.ai.vectorstore.filter.Filter.ExpressionType.NE;

@@ -1,6 +1,6 @@
 # ClickHouse 
 
-This section walks you through setting up `ClickHouseVectorStore`
+This document walks you through setting up `ClickHouseVectorStore`
 to store document embeddings and perform similarity searches.
 
 ## What is ClickHouse
@@ -15,7 +15,7 @@ add the following dependency to your project's Maven `pom.xml` file:
 
 ```xml
 <dependency>
-    <groupId>io.github.spring-ai-community</groupId>
+    <groupId>org.springaicommunity</groupId>
     <artifactId>spring-ai-starter-vector-store-clickhouse</artifactId>
 </dependency>
 ```
@@ -24,7 +24,7 @@ or to your Gradle `build.gradle` build file.
 
 ```groovy
 dependencies {
-    implementation 'io.github.spring-ai-community:spring-ai-starter-vector-store-clickhouse'
+    implementation 'org.springaicommunity:spring-ai-starter-vector-store-clickhouse'
 }
 ```
 

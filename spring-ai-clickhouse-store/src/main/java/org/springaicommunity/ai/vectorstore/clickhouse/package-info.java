@@ -19,7 +19,7 @@
  */
 @NonNullApi
 @NonNullFields
-package org.springframework.ai.vectorstore.clickhouse;
+package org.springaicommunity.ai.vectorstore.clickhouse;
 
 import org.springframework.lang.NonNullApi;
 import org.springframework.lang.NonNullFields;

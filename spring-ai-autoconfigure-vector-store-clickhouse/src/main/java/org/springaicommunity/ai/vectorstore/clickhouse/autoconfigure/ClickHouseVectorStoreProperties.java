@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-package org.springframework.ai.vectorstore.clickhouse.autoconfigure;
+package org.springaicommunity.ai.vectorstore.clickhouse.autoconfigure;
 
 import java.time.Duration;
-import org.springframework.ai.vectorstore.clickhouse.ClickHouseVectorStore;
+import org.springaicommunity.ai.vectorstore.clickhouse.ClickHouseVectorStore;
 import org.springframework.ai.vectorstore.properties.CommonVectorStoreProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
