@@ -38,7 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingOptionsBuilder;
+import org.springframework.ai.embedding.EmbeddingOptions;
 import org.springframework.ai.model.EmbeddingUtils;
 import org.springframework.ai.observation.conventions.VectorStoreSimilarityMetric;
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
@@ -129,8 +129,8 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
 
     @Override
     public void doAdd(List<Document> documents) {
-        List<float[]> embeddings = this.embeddingModel.embed(
-                documents, EmbeddingOptionsBuilder.builder().build(), this.batchingStrategy);
+        List<float[]> embeddings =
+                this.embeddingModel.embed(documents, EmbeddingOptions.builder().build(), this.batchingStrategy);
 
         List<Map<String, Object>> dtos = new ArrayList<>();
         for (Document document : documents) {
