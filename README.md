@@ -1,4 +1,15 @@
-# ClickHouse 
+<div align="center">
+  <h1>Spring AI ClickHouse Store</h1>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0">
+    <img alt="Apache 2.0 License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg">
+  </a>
+  <a href="https://central.sonatype.com/artifact/io.github.linarkou/spring-ai-starter-vector-store-clickhouse">
+    <img alt="Maven Central Version" src="https://img.shields.io/maven-central/v/io.github.linarkou/spring-ai-starter-vector-store-clickhouse">
+  </a>
+  <a href="https://github.com/linarkou/spring-ai-clickhouse-store/actions/workflows/maven-build.yml">
+    <img alt="Build Status" src="https://github.com/linarkou/spring-ai-clickhouse-store/actions/workflows/maven-build.yml/badge.svg">
+  </a>
+</div>
 
 This document walks you through setting up `ClickHouseVectorStore`
 to store document embeddings and perform similarity searches.
