@@ -139,16 +139,8 @@ class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
         var b = new FilterExpressionBuilder();
         return Stream.of(
                 Arguments.of(b.eq("meta1", "meta1").build(), "meta1 == 'meta1'", List.of("1")),
-                Arguments.of(
-                        b.ne("meta1", null).build(),
-                        // "meta1 != null", - https://github.com/spring-projects/spring-ai/issues/3694
-                        null, // native filter expression 'is not null' is not supported
-                        List.of("1")),
-                Arguments.of(
-                        b.eq("meta1", null).build(),
-                        // "meta1 == null", - https://github.com/spring-projects/spring-ai/issues/3694
-                        null, // native filter expression 'is null' is not supported
-                        List.of("2", "3")),
+                Arguments.of(b.isNotNull("meta1").build(), "meta1 IS NOT NULL", List.of("1")),
+                Arguments.of(b.isNull("meta1").build(), "meta1 IS NULL", List.of("2", "3")),
                 Arguments.of(
                         b.or(b.eq("meta1", "meta1"), b.eq("meta2", "meta2")).build(),
                         "meta1 == 'meta1' OR meta2 == 'meta2'",
