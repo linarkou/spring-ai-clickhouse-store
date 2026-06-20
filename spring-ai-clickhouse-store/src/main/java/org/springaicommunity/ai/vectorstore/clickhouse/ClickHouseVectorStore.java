@@ -16,15 +16,12 @@
 
 package org.springaicommunity.ai.vectorstore.clickhouse;
 
-import static com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL;
-
 import com.clickhouse.client.api.Client;
 import com.clickhouse.client.api.insert.InsertResponse;
 import com.clickhouse.client.api.metrics.ServerMetrics;
 import com.clickhouse.client.api.query.GenericRecord;
 import com.clickhouse.data.ClickHouseFormat;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -32,6 +29,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -50,6 +48,9 @@ import org.springframework.ai.vectorstore.observation.VectorStoreObservationCont
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The ClickhouseVectorStore is for managing and querying vector data in a Clickhouse db.
@@ -63,7 +64,10 @@ import org.springframework.util.StringUtils;
  */
 public class ClickHouseVectorStore extends AbstractObservationVectorStore implements InitializingBean, AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(ClickHouseVectorStore.class);
-    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper().setSerializationInclusion(NON_NULL);
+    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = JsonMapper.builder()
+            .changeDefaultPropertyInclusion(incl -> incl.withValueInclusion(JsonInclude.Include.NON_NULL)
+                    .withContentInclusion(JsonInclude.Include.NON_NULL))
+            .build();
     private static final Map<DistanceType, VectorStoreSimilarityMetric> SIMILARITY_TYPE_MAPPING = Map.of(
             DistanceType.COSINE, VectorStoreSimilarityMetric.COSINE,
             DistanceType.L2, VectorStoreSimilarityMetric.EUCLIDEAN);
@@ -137,7 +141,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
             Map<String, Object> dto = Map.of(
                     this.idColumnName, document.getId(),
                     this.embeddingColumnName, EmbeddingUtils.toList(embeddings.get(documents.indexOf(document))),
-                    this.contentColumnName, document.getText(),
+                    this.contentColumnName, Objects.requireNonNullElse(document.getText(), ""),
                     this.metadataColumnName, document.getMetadata());
             dtos.add(dto);
         }
@@ -148,11 +152,11 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         try (InsertResponse response = client.insert(this.getFullTableName(), inputStream, ClickHouseFormat.JSON)
                 .get(timeout, TimeUnit.MILLISECONDS)) {
             if (logger.isDebugEnabled()) {
-                logger.debug(
-                        "Insert finished: {} rows added",
-                        response.getMetrics()
+                logger.debug("Insert finished: "
+                        + response.getMetrics()
                                 .getMetric(ServerMetrics.NUM_ROWS_WRITTEN)
-                                .getLong());
+                                .getLong()
+                        + " rows added");
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to write JSONEachRow data", e);
@@ -162,7 +166,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     private byte[] toJson(List<Map<String, Object>> dataList) {
         try {
             return objectMapper.writeValueAsBytes(dataList);
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new IllegalStateException("Conversion from Object to JSON failed", ex);
         }
     }
@@ -186,10 +190,14 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         try {
             String nativeFilterExpression = this.filterExpressionConverter.convertExpression(filterExpression);
             String sql = String.format("DELETE FROM %s WHERE %s", getFullTableName(), nativeFilterExpression);
-            logger.debug("Executing delete with filter: {}", sql);
+            if (logger.isDebugEnabled()) {
+                logger.debug("Executing delete with filter: " + sql);
+            }
             this.client.execute(sql);
         } catch (Exception e) {
-            logger.error("Failed to delete documents by filter: {}", e.getMessage(), e);
+            if (logger.isErrorEnabled()) {
+                logger.error("Failed to delete documents by filter: " + e.getMessage(), e);
+            }
             throw new IllegalStateException("Failed to delete documents by filter", e);
         }
     }
@@ -217,8 +225,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
             filteringClause =
                     "AND (" + this.filterExpressionConverter.convertExpression(request.getFilterExpression()) + ")";
         }
-        String queryTemplate =
-                """
+        String queryTemplate = """
                 WITH {embedding:Array(Float32)} AS reference_vector
                 SELECT %s, %s, %s, %s(%s, reference_vector) as %s
                 FROM %s
@@ -294,8 +301,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     }
 
     private void createTable() {
-        String queryTemplate =
-                """
+        String queryTemplate = """
                 CREATE TABLE IF NOT EXISTS %s
                 (
                         %s String,           -- id

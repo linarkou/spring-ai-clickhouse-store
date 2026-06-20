@@ -66,7 +66,8 @@ public class ClickHouseVectorStoreAutoConfigurationIT {
     }
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(ClickHouseVectorStoreAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(
+                    ClickHouseClientAutoConfiguration.class, ClickHouseVectorStoreAutoConfiguration.class))
             .withUserConfiguration(Config.class)
             .withPropertyValues(
                     "spring.ai.vectorstore.clickhouse.client.endpoints[0]=" + getConnectionString(),
