@@ -19,6 +19,13 @@ to store document embeddings and perform similarity searches.
 for online analytical processing (OLAP) that allows users to generate analytical reports using SQL queries in real-time.
 It is available as both an open-source software and a cloud offering.
 
+## Compatibility
+
+This branch targets **Spring AI 2.0.2**, **Spring Boot 4.1.2**, and **Java 17+**.
+The implementation follows the core store, auto-configuration, and starter separation
+used by the [Spring AI vector store modules](https://github.com/spring-projects/spring-ai/tree/v2.0.2/vector-stores).
+The starter also includes Spring AI's vector store observation auto-configuration.
+
 ## Auto-configuration
 
 To enable Spring Boot auto-configuration for the ClickHouse Vector Store,
@@ -54,7 +61,7 @@ new Document("Spring AI rocks!! Spring AI rocks!! Spring AI rocks!! Spring AI ro
 new Document("The World is Big and Salvation Lurks Around the Corner"),
 new Document("You walk forward facing the past and you turn back toward the future.", Map.of("meta2", "meta2")));
 
-// Add the documents to Qdrant
+// Add the documents to ClickHouse
 vectorStore.add(documents);
 
 // Retrieve documents similar to a query
@@ -73,7 +80,7 @@ vectorStore.similaritySearch(
         .query("The World")
         .topK(TOP_K)
         .similarityThreshold(SIMILARITY_THRESHOLD)
-        .filterExpression("author != 'john' && 'article_type' == 'blog'").build());
+        .filterExpression("author != 'john' && article_type == 'blog'").build());
 ```
 
 or programmatically using the `Filter.Expression` DSL:
@@ -91,11 +98,20 @@ vectorStore.similaritySearch(
             b.eq("article_type", "blog")).build()).build());
 ```
 
-For more examples, see [test ClickHouseVectorStoreIT.testSimilaritySearchWithFilters()](./src/test/java/org/springframework/ai/vectorstore/clickhouse/ClickHouseVectorStoreIT.java)
+Search results expose the similarity as `Document.getScore()` and the raw distance
+as `Document.getMetadata().get("distance")`, following Spring AI's vector store convention.
+The similarity score is `1 - distance` for both supported distance functions.
+Positive `similarityThreshold` values select documents with a score greater than or equal to the threshold.
+`similarityThresholdAll()` disables the threshold, including for L2 distances greater than one.
+When upgrading from 2.0.0, note that `distance` previously contained the similarity score
+and the threshold comparison was reversed. Applications reading that metadata should
+use `Document.getScore()` if they need the similarity.
+
+For more examples, see [test ClickHouseVectorStoreIT.testSimilaritySearchWithFilters()](./spring-ai-clickhouse-store/src/test/java/org/springaicommunity/ai/vectorstore/clickhouse/ClickHouseVectorStoreIT.java).
 
 ## Configuration Properties
 
-To connect to Qdrant and use the `ClickHouseVectorStore`, you need to provide access details for your instance.
+To connect to ClickHouse and use the `ClickHouseVectorStore`, you need to provide access details for your instance.
 A simple configuration can be provided via Spring Boot's `application.yml`:
 
 ```yaml
@@ -123,6 +139,7 @@ Properties starting with `spring.ai.vectorstore.clickhouse.*` are used to config
 | `spring.ai.vectorstore.clickhouse.content-column-name`               | The content column name for the table                                             | `content`
 | `spring.ai.vectorstore.clickhouse.embedding-column-name`             | The embedding column name for the table                                           | `embedding`
 | `spring.ai.vectorstore.clickhouse.distance-type`                     | The distance type to be used for vector similarity search                         | `COSINE`
+| `spring.ai.vectorstore.clickhouse.initialize-schema`                 | Create the database and vector table on startup                                   | `false`
 | `spring.ai.vectorstore.clickhouse.request-timeout`                   | Timeout for all requests (used in CompletableFuture::get)                         | `10s`
 | `spring.ai.vectorstore.clickhouse.client.endpoints`                  | Uris of CLickHouse instances                                                      | -
 | `spring.ai.vectorstore.clickhouse.client.username`                   | Username for authentication with server                                           | -
@@ -150,11 +167,18 @@ Properties starting with `spring.ai.vectorstore.clickhouse.*` are used to config
 ## Accessing the Native Client
 
 The ClickHouse Vector Store auto-configuration provides access to the underlying native ClickHouse client v2 (`Client`)
-through the preconfigured-bean:
+through the `VectorStore` interface, as with Spring AI's built-in vector stores:
 
 ```java
-com.clickhouse.client.api.Client chClient = context.getBean(com.clickhouse.client.api.Client.class);
+Client chClient = vectorStore.<Client>getNativeClient().orElseThrow();
 ```
 
 The native client gives you access to ClickHouse-specific features and operations
 that might not be exposed through the `VectorStore` interface.
+The auto-configured `Client` is also available as a Spring bean.
+
+## Building and testing
+
+Run unit tests and build all modules with `mvn clean verify`.
+Run the ClickHouse integration tests with `mvn clean verify -P integration-tests`.
+Integration tests require Docker and download the local Transformers embedding model on first use.
