@@ -22,6 +22,7 @@ It is available as both an open-source software and a cloud offering.
 ## Compatibility
 
 This branch targets **Spring AI 2.0.2**, **Spring Boot 4.1.2**, and **Java 17+**.
+It uses **ClickHouse Java Client v2 0.11.0**, including support for ZSTD-compressed server responses.
 The implementation follows the core store, auto-configuration, and starter separation
 used by the [Spring AI vector store modules](https://github.com/spring-projects/spring-ai/tree/v2.0.2/vector-stores).
 The starter also includes Spring AI's vector store observation auto-configuration.
@@ -144,7 +145,7 @@ Properties starting with `spring.ai.vectorstore.clickhouse.*` are used to config
 | `spring.ai.vectorstore.clickhouse.client.endpoints`                  | Uris of CLickHouse instances                                                      | -
 | `spring.ai.vectorstore.clickhouse.client.username`                   | Username for authentication with server                                           | -
 | `spring.ai.vectorstore.clickhouse.client.password`                   | Password for authentication with server                                           | -
-| `spring.ai.vectorstore.clickhouse.client.access-token`               | Access token for authentication with server                                       | -
+| `spring.ai.vectorstore.clickhouse.client.access-token`               | Full Authorization header value, including the scheme (for example, `Bearer <token>`) | -
 | `spring.ai.vectorstore.clickhouse.client.default-database-name`      | The default database name that will be used by operations if not specified        | -
 | `spring.ai.vectorstore.clickhouse.client.ssl-authentication`         | Whether to use SSL Client Certificate to authenticate with server                 | -
 | `spring.ai.vectorstore.clickhouse.client.ssl-trust-store-path`       | Path to the trust store file. Cannot be combined with certificates                | -
