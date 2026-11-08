@@ -14,6 +14,8 @@
 This document walks you through setting up `ClickHouseVectorStore`
 to store document embeddings and perform similarity searches.
 
+Maintainers: see [automated releases, setup, and recovery](docs/releasing.md).
+
 ## What is ClickHouse
 [ClickHouse](https://clickhouse.com/) is a high-performance, column-oriented SQL database management system (DBMS)
 for online analytical processing (OLAP) that allows users to generate analytical reports using SQL queries in real-time.
