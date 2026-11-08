@@ -32,7 +32,7 @@ public class ClickHouseVectorStoreAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(BatchingStrategy.class)
-    BatchingStrategy batchingStrategy() {
+    BatchingStrategy clickHouseVectorStoreBatchingStrategy() {
         return new TokenCountBatchingStrategy();
     }
 

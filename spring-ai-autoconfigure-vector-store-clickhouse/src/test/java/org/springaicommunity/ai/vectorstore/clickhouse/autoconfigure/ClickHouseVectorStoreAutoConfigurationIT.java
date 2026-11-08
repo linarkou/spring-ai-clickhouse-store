@@ -224,7 +224,9 @@ public class ClickHouseVectorStoreAutoConfigurationIT {
 
         @Bean
         public EmbeddingModel embeddingModel() {
-            return new TransformersEmbeddingModel();
+            var model = new TransformersEmbeddingModel();
+            model.setResourceCacheDirectory("target/embedding-model-cache");
+            return model;
         }
     }
 }
