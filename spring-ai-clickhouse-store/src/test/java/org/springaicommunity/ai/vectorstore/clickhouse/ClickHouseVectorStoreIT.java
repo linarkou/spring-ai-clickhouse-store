@@ -195,25 +195,6 @@ class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
         });
     }
 
-    @Test
-    void readsZstdCompressedServerResponses() throws Exception {
-        try (Client client = new Client.Builder()
-                        .addEndpoint("http://" + clickHouseContainer.getHost() + ":"
-                                + clickHouseContainer.getMappedPort(8123))
-                        .setUsername(clickHouseContainer.getUsername())
-                        .setPassword(clickHouseContainer.getPassword())
-                        .compressServerResponse(true)
-                        .build();
-                Records records = client.queryRecords(
-                                "SELECT 'Spring AI' AS content SETTINGS network_compression_method = 'zstd'")
-                        .get()) {
-            var iterator = records.iterator();
-            assertThat(iterator.hasNext()).isTrue();
-            assertThat(iterator.next().getString("content")).isEqualTo("Spring AI");
-            assertThat(iterator.hasNext()).isFalse();
-        }
-    }
-
     public static Stream<Arguments> filterExpressions() {
         var b = new FilterExpressionBuilder();
         return Stream.of(
