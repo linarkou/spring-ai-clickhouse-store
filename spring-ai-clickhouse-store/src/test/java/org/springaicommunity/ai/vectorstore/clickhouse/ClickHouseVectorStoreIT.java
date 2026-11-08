@@ -1,7 +1,11 @@
 package org.springaicommunity.ai.vectorstore.clickhouse;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.clickhouse.client.api.Client;
 import com.clickhouse.client.api.data_formats.internal.BinaryStreamReader;
@@ -22,6 +26,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -135,6 +140,61 @@ class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
         });
     }
 
+    @ParameterizedTest
+    @EnumSource(ClickHouseVectorStore.DistanceType.class)
+    void similarityThresholdAndDistanceFollowSpringAiConventions(ClickHouseVectorStore.DistanceType distanceType) {
+        this.contextRunner.run(context -> {
+            Client client = context.getBean(Client.class);
+            EmbeddingModel model = mock(EmbeddingModel.class);
+            when(model.dimensions()).thenReturn(3);
+            when(model.embed("query")).thenReturn(new float[] {1, 0, 0});
+            String tableName = "threshold_" + distanceType.name().toLowerCase(java.util.Locale.ROOT);
+            var store = ClickHouseVectorStore.builder(client, model)
+                    .tableName(tableName)
+                    .distanceType(distanceType)
+                    .initializeSchema(true)
+                    .build();
+            store.afterPropertiesSet();
+            try {
+                client.execute("INSERT INTO ai." + tableName + " (id, content, embedding, metadata) VALUES "
+                                + "('near', 'near', [1, 0, 0], '{}'), "
+                                + "('middle', 'middle', [0.8, 0.6, 0], '{}'), "
+                                + "('far', 'far', [0, 1, 0], '{}')")
+                        .get();
+
+                double threshold = distanceType == ClickHouseVectorStore.DistanceType.COSINE ? 0.7 : 0.3;
+                List<Document> results = store.similaritySearch(SearchRequest.builder()
+                        .query("query")
+                        .topK(5)
+                        .similarityThreshold(threshold)
+                        .build());
+                assertThat(results).extracting(Document::getId).containsExactly("near", "middle");
+                double expectedDistance =
+                        distanceType == ClickHouseVectorStore.DistanceType.COSINE ? 0.2 : Math.sqrt(0.4);
+                Document middle = results.get(1);
+                assertThat(middle.getScore()).isCloseTo(1 - expectedDistance, within(0.00001));
+                assertThat(((Number) middle.getMetadata().get("distance")).doubleValue())
+                        .isCloseTo(expectedDistance, within(0.00001));
+                assertThat(store.similaritySearch(SearchRequest.builder()
+                                .query("query")
+                                .topK(5)
+                                .similarityThreshold(1)
+                                .build()))
+                        .extracting(Document::getId)
+                        .containsExactly("near");
+                assertThat(store.similaritySearch(SearchRequest.builder()
+                                .query("query")
+                                .topK(5)
+                                .similarityThresholdAll()
+                                .build()))
+                        .extracting(Document::getId)
+                        .containsExactly("near", "middle", "far");
+            } finally {
+                client.execute("DROP TABLE ai." + tableName).get();
+            }
+        });
+    }
+
     public static Stream<Arguments> filterExpressions() {
         var b = new FilterExpressionBuilder();
         return Stream.of(
@@ -149,11 +209,11 @@ class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
                         b.and(b.eq("meta1", "meta1"), b.eq("meta2", "meta2")).build(),
                         "meta1 == 'meta1' AND meta2 == 'meta2'",
                         List.of()),
-                Arguments.of(b.eq("intMeta", 123).build(), "intMeta == 123'", List.of("3")),
-                Arguments.of(b.gte("intMeta", 123).build(), "intMeta >= 123'", List.of("1", "3")),
-                Arguments.of(b.lte("intMeta", 123).build(), "intMeta <= 123'", List.of("3")),
-                Arguments.of(b.gt("intMeta", 120).build(), "intMeta > 120'", List.of("1", "3")),
-                Arguments.of(b.lt("intMeta", 130).build(), "intMeta < 130'", List.of("3")),
+                Arguments.of(b.eq("intMeta", 123).build(), "intMeta == 123", List.of("3")),
+                Arguments.of(b.gte("intMeta", 123).build(), "intMeta >= 123", List.of("1", "3")),
+                Arguments.of(b.lte("intMeta", 123).build(), "intMeta <= 123", List.of("3")),
+                Arguments.of(b.gt("intMeta", 120).build(), "intMeta > 120", List.of("1", "3")),
+                Arguments.of(b.lt("intMeta", 130).build(), "intMeta < 130", List.of("3")),
                 Arguments.of(
                         b.in("intMeta::UInt32", 123, 456).build(),
                         null,
@@ -239,7 +299,9 @@ class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
 
         @Bean
         public EmbeddingModel embeddingModel() {
-            return new TransformersEmbeddingModel();
+            var model = new TransformersEmbeddingModel();
+            model.setResourceCacheDirectory("target/embedding-model-cache");
+            return model;
         }
 
         @Bean

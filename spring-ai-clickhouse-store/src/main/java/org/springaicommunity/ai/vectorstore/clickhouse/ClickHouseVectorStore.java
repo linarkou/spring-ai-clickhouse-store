@@ -30,11 +30,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.document.DocumentMetadata;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingOptions;
 import org.springframework.ai.model.EmbeddingUtils;
@@ -132,6 +134,13 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     }
 
     @Override
+    public <T> Optional<T> getNativeClient() {
+        @SuppressWarnings("unchecked")
+        T nativeClient = (T) this.client;
+        return Optional.of(nativeClient);
+    }
+
+    @Override
     public void doAdd(List<Document> documents) {
         List<float[]> embeddings =
                 this.embeddingModel.embed(documents, EmbeddingOptions.builder().build(), this.batchingStrategy);
@@ -220,6 +229,9 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     }
 
     private String buildSearchQuery(SearchRequest request) {
+        String thresholdClause = request.getSimilarityThreshold() == SearchRequest.SIMILARITY_THRESHOLD_ACCEPT_ALL
+                ? "1 = 1"
+                : "distance <= 1 - {similarityThreshold:Float64}";
         String filteringClause = "";
         if (request.hasFilterExpression()) {
             filteringClause =
@@ -229,7 +241,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
                 WITH {embedding:Array(Float32)} AS reference_vector
                 SELECT %s, %s, %s, %s(%s, reference_vector) as %s
                 FROM %s
-                WHERE distance >= {similarityThreshold:Float64}
+                WHERE %s
                   %s
                 ORDER BY distance
                 LIMIT {topK:UInt32}
@@ -243,6 +255,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
                 this.embeddingColumnName,
                 DISTANCE_COLUMN_NAME,
                 this.getFullTableName(),
+                thresholdClause,
                 filteringClause);
     }
 
@@ -257,7 +270,7 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
 
     private Map<String, Object> getMetadata(GenericRecord record) {
         Map<String, Object> filteredMetadata = filter((Map<String, Object>) record.getObject(this.metadataColumnName));
-        filteredMetadata.put(DISTANCE_COLUMN_NAME, 1.0 - record.getDouble(DISTANCE_COLUMN_NAME));
+        filteredMetadata.put(DocumentMetadata.DISTANCE.value(), record.getDouble(DISTANCE_COLUMN_NAME));
         return filteredMetadata;
     }
 

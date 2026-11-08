@@ -4,10 +4,12 @@ on:
   pull_request:
     branches:
       - main
+      - spring-ai-community
       - release/**
   push:
     branches:
       - main
+      - spring-ai-community
       - release/**
 
 jobs:
@@ -16,10 +18,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v6.2.0
         with:
           java-version: '17'
           distribution: 'temurin'

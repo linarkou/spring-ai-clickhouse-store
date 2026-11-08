@@ -1,29 +1,174 @@
-name: Publish package to the Maven Central Repository
+name: Release
+run-name: Release v${{ inputs.version }}
+
 on:
-  release:
-    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable version to release (for example, 2.0.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize all versions: never cancel a deployment that may already be on Central.
+concurrency:
+  group: maven-central-release
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
-      contents: read
-      packages: write
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Java for publishing to Maven Central Repository
-        uses: actions/setup-java@v4
+      - name: Check out the selected default-branch commit
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate version and publishing configuration
+        env:
+          MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_pattern ]]; then
+            echo '::error::Use a stable version such as 2.0.1, without v or -SNAPSHOT.'
+            exit 1
+          fi
+          for name in MAVEN_USERNAME MAVEN_PASSWORD GPG_PRIVATE_KEY MAVEN_GPG_PASSPHRASE; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing publishing secret for $name; see docs/releasing.md."
+              exit 1
+            fi
+          done
+
+      - name: Set up Java for verification
+        uses: actions/setup-java@v6.2.0
         with:
           java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
+
+      - name: Prepare revision or reuse the immutable release tag
+        id: prepare
+        run: |
+          tag="v$VERSION"
+          existing=false
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            read -r commit parent extra <<< "$(git rev-list --parents -n 1 "$tag")"
+            if [[ -z "$parent" || -n "$extra" ]]; then
+              echo '::error::A release commit must have exactly one parent.'
+              exit 1
+            fi
+            git merge-base --is-ancestor "$parent" "origin/$DEFAULT_BRANCH"
+            git checkout --detach "$parent"
+            existing=true
+          fi
+          mvn --batch-mode --no-transfer-progress --non-recursive \
+            org.codehaus.mojo:versions-maven-plugin:2.24.0:set-property \
+            -Dproperty=revision -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+          if [[ "$existing" == true ]]; then
+            # Recreating the revision change must reproduce the complete tagged tree.
+            git diff --exit-code "refs/tags/$tag" --
+            git restore -- pom.xml
+            git checkout --detach "refs/tags/$tag"
+          fi
+          echo "existing=$existing" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check for an already published or partial Central release
+        id: central
+        env:
+          EXISTING_TAG: ${{ steps.prepare.outputs.existing }}
+        run: |
+          artifacts=(spring-ai-clickhouse-store-parent spring-ai-clickhouse-store spring-ai-autoconfigure-vector-store-clickhouse spring-ai-starter-vector-store-clickhouse)
+          published=0
+          for artifact in "${artifacts[@]}"; do
+            url="https://repo.maven.apache.org/maven2/org/springaicommunity/$artifact/$VERSION/$artifact-$VERSION.pom"
+            status=$(curl --silent --show-error --retry 3 --output /dev/null --write-out '%{http_code}' "$url")
+            case "$status" in
+              200) published=$((published + 1)) ;;
+              404) ;;
+              *) echo "::error::Central returned HTTP $status for $artifact"; exit 1 ;;
+            esac
+          done
+          if [[ "$published" -gt 0 && "$published" -lt "${#artifacts[@]}" ]]; then
+            echo '::error::Partial Central publication. Inspect the existing deployment in Central Portal before retrying.'
+            exit 1
+          fi
+          if [[ "$published" -eq "${#artifacts[@]}" ]]; then
+            if [[ "$EXISTING_TAG" != true ]]; then
+              echo '::error::This version is already published without a matching release tag. Choose a new version.'
+              exit 1
+            fi
+            echo 'published=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'published=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify the release revision, including integration tests
+        run: mvn --batch-mode --no-transfer-progress clean verify -P integration-tests
+
+      - name: Create the release commit and annotated tag
+        if: steps.prepare.outputs.existing != 'true'
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pom.xml
+          git commit -m "Release $TAG"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "refs/tags/$TAG"
+
+      - name: Create or reuse the draft GitHub Release
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+          CENTRAL_PUBLISHED: ${{ steps.central.outputs.published }}
+        run: |
+          if draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" != true && "$CENTRAL_PUBLISHED" != true ]]; then
+              echo '::error::The GitHub Release is public but Central is incomplete. Inspect both before retrying.'
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --generate-notes --title "$TAG"
+          fi
+
+      - name: Set up signing and Central Portal credentials
+        if: steps.central.outputs.published != 'true'
+        uses: actions/setup-java@v6.2.0
+        with:
+          java-version: '17'
+          distribution: temurin
           server-id: maven-central
           server-username: MAVEN_USERNAME
           server-password: MAVEN_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: MAVEN_GPG_PASSPHRASE
-      - name: Publish to the Maven Central Repository
-        run: mvn clean deploy -DskipTests -P release
+
+      - name: Publish signed artifacts and wait for Maven Central
+        if: steps.central.outputs.published != 'true'
+        run: mvn --batch-mode --no-transfer-progress clean deploy -P release -DskipTests
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
           MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Publish the GitHub Release after Central succeeds
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --draft=false
+          echo "Released [$TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG) from commit $(git rev-parse HEAD)." >> "$GITHUB_STEP_SUMMARY"

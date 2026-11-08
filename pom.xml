@@ -6,7 +6,7 @@
 
     <groupId>org.springaicommunity</groupId>
     <artifactId>spring-ai-clickhouse-store-parent</artifactId>
-    <version>2.0.0-SNAPSHOT</version>
+    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <name>Spring AI Vector Store – Clickhouse - Parent</name>
@@ -42,13 +42,15 @@
     </developers>
 
     <properties>
+        <revision>2.0.1-SNAPSHOT</revision>
         <java.version>17</java.version>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>4.1.0</spring-boot.version>
-        <spring-ai.version>2.0.0</spring-ai.version>
-        <clickhouse.version>0.9.8</clickhouse.version>
-        <maven.deploy.plugin.version>3.1.4</maven.deploy.plugin.version>
+        <spring-boot.version>4.1.2</spring-boot.version>
+        <spring-ai.version>2.0.2</spring-ai.version>
+        <clickhouse.version>0.11.0</clickhouse.version>
+        <maven.deploy.plugin.version>3.2.0</maven.deploy.plugin.version>
+        <maven.test.plugin.version>3.6.1</maven.test.plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -90,8 +92,33 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.5.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.5.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.5.1</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-install-plugin</artifactId>
+                <version>3.2.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven.test.plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
+                <version>3.16.0</version>
                 <configuration>
                     <annotationProcessorPaths>
                         <path>
@@ -109,7 +136,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>3.7.0</version>
+                <version>3.11.0</version>
                 <configuration>
                     <java>
                         <palantirJavaFormat/>
@@ -133,7 +160,7 @@
                     <execution>
                         <id>attach-sources</id>
                         <goals>
-                            <goal>jar</goal>
+                            <goal>jar-no-fork</goal>
                         </goals>
                     </execution>
                 </executions>
@@ -164,6 +191,31 @@
                     <skip>true</skip>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.8.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
@@ -175,7 +227,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-failsafe-plugin</artifactId>
-                        <version>3.5.6</version>
+                        <version>${maven.test.plugin.version}</version>
                         <executions>
                             <execution>
                                 <goals>
@@ -185,9 +237,7 @@
                             </execution>
                         </executions>
                         <configuration>
-                            <!-- Запускает все *IT.java -->
                             <includes>
-                                <include>**/*Test.java</include>
                                 <include>**/*IT.java</include>
                             </includes>
                         </configuration>
@@ -233,7 +283,7 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.11.0</version>
+                        <version>0.12.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>maven-central</publishingServerId>

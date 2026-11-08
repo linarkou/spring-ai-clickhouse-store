@@ -25,3 +25,6 @@ replay_pid*
 
 .idea
 **/target
+
+# Generated POMs for Maven CI-friendly versions
+.flattened-pom.xml
