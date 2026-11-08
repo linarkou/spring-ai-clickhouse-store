@@ -19,14 +19,6 @@ to store document embeddings and perform similarity searches.
 for online analytical processing (OLAP) that allows users to generate analytical reports using SQL queries in real-time.
 It is available as both an open-source software and a cloud offering.
 
-## Compatibility
-
-This branch targets **Spring AI 2.0.2**, **Spring Boot 4.1.2**, and **Java 17+**.
-It uses **ClickHouse Java Client v2 0.11.0**, including support for ZSTD-compressed server responses.
-The implementation follows the core store, auto-configuration, and starter separation
-used by the [Spring AI vector store modules](https://github.com/spring-projects/spring-ai/tree/v2.0.2/vector-stores).
-The starter also includes Spring AI's vector store observation auto-configuration.
-
 ## Auto-configuration
 
 To enable Spring Boot auto-configuration for the ClickHouse Vector Store,
