@@ -19,7 +19,6 @@ concurrency:
 
 jobs:
   release:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -27,15 +26,18 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      SOURCE_BRANCH: ${{ github.ref_name }}
+      SOURCE_REF: ${{ github.ref }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Check out the selected default-branch commit
+      - name: Check out the selected source commit
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Validate version and publishing configuration
+        id: validate
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
@@ -47,6 +49,12 @@ jobs:
             echo '::error::Use a stable version such as 2.0.1, without v or -SNAPSHOT.'
             exit 1
           fi
+          release_branch="release/${VERSION%.*}.x"
+          if [[ "$SOURCE_REF" != "refs/heads/$DEFAULT_BRANCH" && "$SOURCE_REF" != "refs/heads/$release_branch" ]]; then
+            echo "::error::Release $VERSION must run from $DEFAULT_BRANCH or $release_branch; selected $SOURCE_REF."
+            exit 1
+          fi
+          echo "release_branch=$release_branch" >> "$GITHUB_OUTPUT"
           for name in MAVEN_USERNAME MAVEN_PASSWORD GPG_PRIVATE_KEY MAVEN_GPG_PASSPHRASE; do
             if [[ -z "${!name}" ]]; then
               echo "::error::Missing publishing secret for $name; see docs/releasing.md."
@@ -62,7 +70,11 @@ jobs:
 
       - name: Prepare revision or reuse the immutable release tag
         id: prepare
+        env:
+          RELEASE_BRANCH: ${{ steps.validate.outputs.release_branch }}
         run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           tag="v$VERSION"
           existing=false
           if git show-ref --verify --quiet "refs/tags/$tag"; then
@@ -71,10 +83,17 @@ jobs:
               echo '::error::A release commit must have exactly one parent.'
               exit 1
             fi
-            git merge-base --is-ancestor "$parent" "origin/$DEFAULT_BRANCH"
+            if ! git merge-base --is-ancestor "$parent" "origin/$SOURCE_BRANCH"; then
+              git merge-base --is-ancestor "$parent" "origin/$RELEASE_BRANCH"
+            fi
             git checkout --detach "$parent"
             existing=true
+          elif [[ "$SOURCE_REF" == "refs/heads/$DEFAULT_BRANCH" ]] && git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
+            source_commit=$(git rev-parse HEAD)
+            git checkout --detach "origin/$RELEASE_BRANCH"
+            git merge --no-edit "$source_commit"
           fi
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           mvn --batch-mode --no-transfer-progress --non-recursive \
             org.codehaus.mojo:versions-maven-plugin:2.24.0:set-property \
             -Dproperty=revision -DnewVersion="$VERSION" -DgenerateBackupPoms=false
@@ -120,13 +139,23 @@ jobs:
       - name: Verify the release revision, including integration tests
         run: mvn --batch-mode --no-transfer-progress clean verify -P integration-tests
 
+      - name: Create or update the release branch from the default branch
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          RELEASE_BRANCH: ${{ steps.validate.outputs.release_branch }}
+          SOURCE_SHA: ${{ steps.prepare.outputs.source_sha }}
+        run: |
+          if git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH" && git merge-base --is-ancestor "$SOURCE_SHA" "origin/$RELEASE_BRANCH"; then
+            echo "$RELEASE_BRANCH already contains the release source commit."
+          else
+            git push origin "$SOURCE_SHA:refs/heads/$RELEASE_BRANCH"
+          fi
+
       - name: Create the release commit and annotated tag
         if: steps.prepare.outputs.existing != 'true'
         env:
           TAG: ${{ steps.prepare.outputs.tag }}
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add pom.xml
           git commit -m "Release $TAG"
           git tag -a "$TAG" -m "Release $TAG"

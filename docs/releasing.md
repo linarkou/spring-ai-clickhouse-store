@@ -1,15 +1,27 @@
 # Releasing
 
 The **Release** workflow automates a stable release from the repository's default
-branch. Start it in Actions → Release → Run workflow, select the default branch,
-and enter an unused version such as `2.0.1` (no `v`, `-SNAPSHOT`, or prerelease suffix).
+branch or a matching `release/<major>.<minor>.x` branch. Start it in Actions → Release
+→ Run workflow, select the source branch, and enter an unused version such as
+`2.0.3` (no `v`, `-SNAPSHOT`, or prerelease suffix).
 A push to the default branch does not publish a release automatically.
+
+From the default branch, version `2.0.3` creates or updates `release/2.0.x`, while
+`2.1.0` uses `release/2.1.x`. An existing release branch is merged with the selected
+default-branch commit so its maintenance changes are preserved. Merge conflicts
+stop the workflow before any branch, tag, or artifact is published.
+
+When starting from `release/2.0.x`, the version must start with `2.0.`; for example,
+`2.0.3` is accepted and `2.1.0` is rejected. The workflow uses the selected release
+branch commit directly and does not create or update a release branch in this case.
+Other source branches and tag refs are rejected.
 
 ## One-time setup
 
-Allow GitHub Actions to write repository contents and ensure tag rules permit
-`github-actions[bot]` to create `v*` tags. The workflow requests `contents: write`;
-it does not need a personal access token or GitHub Packages permission.
+Allow GitHub Actions to write repository contents and ensure branch and tag rules
+permit `github-actions[bot]` to update `release/*` branches and create `v*` tags.
+The workflow requests `contents: write`; it does not need a personal access token
+or GitHub Packages permission.
 
 Configure these repository secrets (the existing names are retained):
 
@@ -28,22 +40,27 @@ keyserver. See Sonatype's [signing requirements](https://central.sonatype.org/pu
 
 ## What the workflow does
 
-1. Rejects runs from a branch other than the default branch and validates a stable
-   `major.minor.patch` version and the presence of publishing secrets.
-2. Uses the default-branch commit selected when the workflow was dispatched.
+1. Validates a stable `major.minor.patch` version, the source branch, and the
+   presence of publishing secrets. A release branch must be named exactly
+   `release/<major>.<minor>.x` for the requested version.
+2. Uses the source commit selected when the workflow was dispatched. For a new
+   release from the default branch, it merges an existing matching release branch
+   with that commit, or starts a new release branch from that commit.
    Sets `<revision>` in the root `pom.xml` with Maven `versions:set-property`;
-   the parent and all modules use
-   `${revision}`. The flatten plugin resolves these placeholders in installed and
-   deployed POMs, including the parent POM.
+   the parent and all modules use `${revision}`. The flatten plugin resolves these
+   placeholders in installed and deployed POMs, including the parent POM.
 3. Runs `mvn clean verify -P integration-tests` on that exact revision, including
    the ClickHouse tests. The Ubuntu runner provides Docker; the first run also
    downloads the embedding model used by the tests.
-4. Creates a release commit that changes only the root POM, an annotated tag
+4. After successful verification, pushes the prepared source commit to the
+   matching release branch when running from the default branch. Branch updates
+   never force-push; retries leave a branch that already contains the source commit
+   in place. When running from a release branch, this step is skipped.
+   Creates a release commit that changes only the root POM, an annotated tag
    `v<version>`, and a draft GitHub Release with generated release notes.
-   Only the tag is pushed: the release commit is based on the default branch but
-   is not pushed back to it. This works with protected branches and leaves
-   `2.0.1-SNAPSHOT` as the development default (maintainers can advance it in a
-   later PR). The released POM always contains the selected stable revision.
+   The release commit is pushed only as a tag, while the release branch contains
+   the source commit before the version change. The default branch retains its
+   development revision. The released POM contains the selected stable revision.
 5. Builds again from that same commit with the `release` profile, attaches
    sources and Javadoc, signs the artifacts, and publishes all four modules
    together through Sonatype's Central Publishing Maven plugin. The plugin waits
@@ -57,11 +74,13 @@ with `GITHUB_TOKEN` does not trigger a second release-event workflow.
 
 ## Retrying a failed release
 
-Re-run the original workflow, or dispatch the same version from the default branch.
+Re-run the original workflow, or dispatch the same version from the default branch
+or its matching release branch.
 The workflow never moves or replaces an existing tag. Before reusing it, it checks
-that the release commit's parent belongs to the default branch. It applies
-`versions:set-property` to that parent and uses `git diff` to confirm the resulting
-source tree exactly matches the tag. It then checks out and tests that exact
+that the release commit's parent belongs to the selected source branch or the
+matching release branch. It applies `versions:set-property` to that parent and uses
+`git diff` to confirm the resulting source tree exactly matches the tag. It then
+checks out and tests that exact
 commit, even if the default branch has advanced.
 
 If all four artifact POMs are already visible on Maven Central, publication is
