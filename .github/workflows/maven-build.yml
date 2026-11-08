@@ -26,12 +26,3 @@ jobs:
 
       - name: Build with Maven
         run: mvn clean verify -P integration-tests --no-transfer-progress
-
-  release-automation:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Test release versioning and tag recovery
-        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v

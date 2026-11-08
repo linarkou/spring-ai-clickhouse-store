@@ -31,7 +31,8 @@ keyserver. See Sonatype's [signing requirements](https://central.sonatype.org/pu
 1. Rejects runs from a branch other than the default branch and validates a stable
    `major.minor.patch` version and the presence of publishing secrets.
 2. Uses the default-branch commit selected when the workflow was dispatched.
-   Stamps `<revision>` in the root `pom.xml`; the parent and all modules use
+   Sets `<revision>` in the root `pom.xml` with Maven `versions:set-property`;
+   the parent and all modules use
    `${revision}`. The flatten plugin resolves these placeholders in installed and
    deployed POMs, including the parent POM.
 3. Runs `mvn clean verify -P integration-tests` on that exact revision, including
@@ -58,8 +59,9 @@ with `GITHUB_TOKEN` does not trigger a second release-event workflow.
 
 Re-run the original workflow, or dispatch the same version from the default branch.
 The workflow never moves or replaces an existing tag. Before reusing it, it checks
-that the release commit's parent belongs to the default branch and that the only
-change is the requested root POM revision. It then checks out and tests that exact
+that the release commit's parent belongs to the default branch. It applies
+`versions:set-property` to that parent and uses `git diff` to confirm the resulting
+source tree exactly matches the tag. It then checks out and tests that exact
 commit, even if the default branch has advanced.
 
 If all four artifact POMs are already visible on Maven Central, publication is

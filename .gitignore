@@ -28,4 +28,3 @@ replay_pid*
 
 # Generated POMs for Maven CI-friendly versions
 .flattened-pom.xml
-__pycache__/
