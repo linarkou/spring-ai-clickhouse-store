@@ -1,12 +1,17 @@
 package org.springaicommunity.ai.vectorstore.clickhouse;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.clickhouse.client.api.Client;
@@ -20,6 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.document.DocumentMetadata;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.vectorstore.EmbeddedDocument;
+import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 
 class ClickHouseVectorStoreTest {
@@ -64,5 +71,59 @@ class ClickHouseVectorStoreTest {
                     .containsEntry(DocumentMetadata.DISTANCE.value(), 0.25);
         });
         verify(records).close();
+    }
+
+    @Test
+    void usesCallerSuppliedQueryVectorAndSearchOptions() {
+        var records = mock(Records.class);
+        when(client.queryRecords(anyString(), anyMap())).thenReturn(CompletableFuture.completedFuture(records));
+        VectorStore store = ClickHouseVectorStore.builder(client, embeddingModel)
+                .dimensions(2)
+                .build();
+
+        store.similaritySearch(
+                new float[] {0, 1},
+                SearchRequest.builder()
+                        .query("ignored")
+                        .topK(2)
+                        .similarityThreshold(0.5)
+                        .filterExpression("source == 'test'")
+                        .build());
+
+        verify(client)
+                .queryRecords(
+                        contains("metadata"),
+                        eq(Map.of("embedding", "[0.0, 1.0]", "topK", 2, "similarityThreshold", 0.5)));
+        verifyNoInteractions(embeddingModel);
+    }
+
+    @Test
+    void rejectsIncorrectDimensionsBeforeWritingOrSearching() {
+        VectorStore store = ClickHouseVectorStore.builder(client, embeddingModel)
+                .upsertEnabled(true)
+                .dimensions(2)
+                .build();
+        var correct = new EmbeddedDocument(new Document("valid"), new float[] {1, 0});
+        var wrong = new EmbeddedDocument(new Document("invalid"), new float[] {1});
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> store.upsert(List.of(correct, wrong)))
+                .withMessageContaining("expects dimension 2");
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> store.similaritySearch(
+                        new float[] {1}, SearchRequest.builder().build()))
+                .withMessageContaining("expects dimension 2");
+        verifyNoInteractions(client, embeddingModel);
+    }
+
+    @Test
+    void leavesLegacyTableWritesOptIn() {
+        VectorStore store =
+                ClickHouseVectorStore.builder(client, embeddingModel).build();
+
+        store.upsert(List.of());
+        assertThatThrownBy(() -> store.upsert(List.of(new EmbeddedDocument(new Document("text"), new float[] {1}))))
+                .isInstanceOf(UnsupportedOperationException.class);
+        verifyNoInteractions(client, embeddingModel);
     }
 }

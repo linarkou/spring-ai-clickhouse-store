@@ -45,6 +45,12 @@ public class ClickHouseVectorStoreProperties extends CommonVectorStoreProperties
 
     private ClickHouseVectorStore.DistanceType distanceType = ClickHouseVectorStore.DEFAULT_DISTANCE_TYPE;
 
+    /** Use a ReplacingMergeTree table for replace-by-id writes. */
+    private boolean upsertEnabled;
+
+    /** Embedding dimensions. Zero uses the model dimensions when initializing the schema. */
+    private int dimensions;
+
     private Duration requestTimeout = Duration.ofMillis(ClickHouseVectorStore.DEFAULT_TIMEOUT);
 
     public String getDatabaseName() {
@@ -101,6 +107,22 @@ public class ClickHouseVectorStoreProperties extends CommonVectorStoreProperties
 
     public void setDistanceType(ClickHouseVectorStore.DistanceType distanceType) {
         this.distanceType = distanceType;
+    }
+
+    public boolean isUpsertEnabled() {
+        return upsertEnabled;
+    }
+
+    public void setUpsertEnabled(boolean upsertEnabled) {
+        this.upsertEnabled = upsertEnabled;
+    }
+
+    public int getDimensions() {
+        return dimensions;
+    }
+
+    public void setDimensions(int dimensions) {
+        this.dimensions = dimensions;
     }
 
     public Duration getRequestTimeout() {

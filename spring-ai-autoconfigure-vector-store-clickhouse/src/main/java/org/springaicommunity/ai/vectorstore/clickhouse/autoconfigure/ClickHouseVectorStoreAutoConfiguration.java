@@ -47,6 +47,8 @@ public class ClickHouseVectorStoreAutoConfiguration {
             BatchingStrategy batchingStrategy) {
         var builder = ClickHouseVectorStore.builder(clickHouseClient, embeddingModel)
                 .initializeSchema(properties.isInitializeSchema())
+                .upsertEnabled(properties.isUpsertEnabled())
+                .dimensions(properties.getDimensions())
                 .databaseName(properties.getDatabaseName())
                 .tableName(properties.getTableName())
                 .idColumnName(properties.getIdColumnName())

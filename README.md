@@ -14,6 +14,8 @@
 This document walks you through setting up `ClickHouseVectorStore`
 to store document embeddings and perform similarity searches.
 
+The `release/2.1.x` branch targets Spring AI 2.1 and Spring Boot 4.2.
+
 Maintainers: see [automated releases, setup, and recovery](docs/releasing.md).
 
 ## What is ClickHouse
@@ -62,6 +64,44 @@ vectorStore.add(documents);
 // Retrieve documents similar to a query
 List<Document> results = vectorStore.similaritySearch(SearchRequest.builder().query("Spring").topK(5).build());
 ```
+
+## Using precomputed embeddings
+
+Spring AI 2.1 lets you supply vectors for writes and searches. Configure the embedding
+dimensions to match your table, and enable upsert when you want to replace documents by ID.
+
+```yaml
+spring:
+  ai:
+    vectorstore:
+      clickhouse:
+        initialize-schema: true
+        upsert-enabled: true
+        dimensions: 1536
+```
+
+```java
+vectorStore.upsert(List.of(new EmbeddedDocument(document, documentEmbedding)));
+
+List<Document> results = vectorStore.similaritySearch(queryEmbedding,
+    SearchRequest.builder().topK(5).similarityThreshold(0.7).build());
+```
+
+Both operations use the supplied vectors directly. In upsert mode, the latest insert
+for an ID is visible immediately through either search method. A repeated ID within
+a single upsert uses the last entry in that batch. A vector query works with either
+table engine. Set `dimensions` explicitly when using a pre-created table.
+
+Upsert mode creates an unpartitioned `ReplacingMergeTree` ordered by the document
+ID column, with no version column. Searches use exact distances and resolve the
+latest document version before applying the filter, threshold, and result limit.
+The default `MergeTree` configuration continues to use its HNSW index.
+
+To enable upsert for an existing `MergeTree` store, create a new table with upsert
+mode and copy the existing documents into it while writes are paused. Choose one row
+per ID if the old table contains duplicates. Verify the copy and update the store's
+`table-name` to point to the new table. `initialize-schema` only creates missing
+tables.
 
 ## Metadata Filtering
 
@@ -135,6 +175,8 @@ Properties starting with `spring.ai.vectorstore.clickhouse.*` are used to config
 | `spring.ai.vectorstore.clickhouse.embedding-column-name`             | The embedding column name for the table                                           | `embedding`
 | `spring.ai.vectorstore.clickhouse.distance-type`                     | The distance type to be used for vector similarity search                         | `COSINE`
 | `spring.ai.vectorstore.clickhouse.initialize-schema`                 | Create the database and vector table on startup                                   | `false`
+| `spring.ai.vectorstore.clickhouse.upsert-enabled`                    | Enable replace-by-ID writes and exact search with a ReplacingMergeTree table       | `false` |
+| `spring.ai.vectorstore.clickhouse.dimensions`                        | Embedding dimensions. Set for caller-supplied vectors with a pre-created table.    | Uses model dimensions during schema initialization |
 | `spring.ai.vectorstore.clickhouse.request-timeout`                   | Timeout for all requests (used in CompletableFuture::get)                         | `10s`
 | `spring.ai.vectorstore.clickhouse.client.endpoints`                  | Uris of CLickHouse instances                                                      | -
 | `spring.ai.vectorstore.clickhouse.client.username`                   | Username for authentication with server                                           | -

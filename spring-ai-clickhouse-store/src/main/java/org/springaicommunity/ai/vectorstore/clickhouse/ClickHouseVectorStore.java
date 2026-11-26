@@ -17,16 +17,20 @@
 package org.springaicommunity.ai.vectorstore.clickhouse;
 
 import com.clickhouse.client.api.Client;
+import com.clickhouse.client.api.command.CommandSettings;
 import com.clickhouse.client.api.insert.InsertResponse;
+import com.clickhouse.client.api.insert.InsertSettings;
 import com.clickhouse.client.api.metrics.ServerMetrics;
 import com.clickhouse.client.api.query.GenericRecord;
 import com.clickhouse.data.ClickHouseFormat;
+import com.clickhouse.data.ClickHouseValues;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,6 +46,7 @@ import org.springframework.ai.embedding.EmbeddingOptions;
 import org.springframework.ai.model.EmbeddingUtils;
 import org.springframework.ai.observation.conventions.VectorStoreSimilarityMetric;
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
+import org.springframework.ai.vectorstore.EmbeddedDocument;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
@@ -97,6 +102,9 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     private String metadataColumnName;
     private DistanceType distanceType;
     private boolean initializeSchema;
+    private final boolean upsertEnabled;
+    private volatile boolean upsertTableValidated;
+    private int dimensions;
     private long timeout;
     private ClickHouseFilterExpressionConverter filterExpressionConverter;
 
@@ -115,6 +123,8 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         this.metadataColumnName = builder.metadataColumnName;
         this.distanceType = builder.distanceType;
         this.initializeSchema = builder.initializeSchema;
+        this.upsertEnabled = builder.upsertEnabled;
+        this.dimensions = builder.dimensions;
         this.timeout = builder.timeout;
         this.filterExpressionConverter = new ClickHouseFilterExpressionConverter(this.metadataColumnName);
     }
@@ -145,20 +155,49 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         List<float[]> embeddings =
                 this.embeddingModel.embed(documents, EmbeddingOptions.builder().build(), this.batchingStrategy);
 
-        List<Map<String, Object>> dtos = new ArrayList<>();
-        for (Document document : documents) {
-            Map<String, Object> dto = Map.of(
-                    this.idColumnName, document.getId(),
-                    this.embeddingColumnName, EmbeddingUtils.toList(embeddings.get(documents.indexOf(document))),
-                    this.contentColumnName, Objects.requireNonNullElse(document.getText(), ""),
-                    this.metadataColumnName, document.getMetadata());
-            dtos.add(dto);
+        List<Map<String, Object>> rows = new ArrayList<>(documents.size());
+        for (int i = 0; i < documents.size(); i++) {
+            rows.add(toRow(documents.get(i), embeddings.get(i)));
+        }
+        insertRows(rows);
+    }
+
+    @Override
+    protected boolean supportsUpsert() {
+        return this.upsertEnabled;
+    }
+
+    @Override
+    protected void doUpsert(List<EmbeddedDocument> entries) {
+        int expected = requiredDimensions();
+        Map<String, Map<String, Object>> rowsById = new LinkedHashMap<>();
+        for (EmbeddedDocument entry : entries) {
+            Document document = entry.document();
+            float[] embedding = entry.embedding();
+            checkDimensions("Embedding for document " + document.getId(), embedding.length, expected);
+            rowsById.put(document.getId(), toRow(document, embedding));
+        }
+        insertRows(new ArrayList<>(rowsById.values()));
+    }
+
+    private Map<String, Object> toRow(Document document, float[] embedding) {
+        return Map.of(
+                this.idColumnName, document.getId(),
+                this.embeddingColumnName, EmbeddingUtils.toList(embedding),
+                this.contentColumnName, Objects.requireNonNullElse(document.getText(), ""),
+                this.metadataColumnName, document.getMetadata());
+    }
+
+    private void insertRows(List<Map<String, Object>> rows) {
+        validateUpsertTable();
+        InputStream inputStream = new ByteArrayInputStream(toJson(rows));
+        InsertSettings settings = new InsertSettings();
+        if (this.upsertEnabled) {
+            settings.serverSetting("async_insert", "0").serverSetting("insert_deduplicate", "0");
         }
 
-        byte[] json = toJson(dtos);
-        InputStream inputStream = new ByteArrayInputStream(json);
-
-        try (InsertResponse response = client.insert(this.getFullTableName(), inputStream, ClickHouseFormat.JSON)
+        try (InsertResponse response = client.insert(
+                        this.getFullTableName(), inputStream, ClickHouseFormat.JSON, settings)
                 .get(timeout, TimeUnit.MILLISECONDS)) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Insert finished: "
@@ -167,8 +206,11 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
                                 .getLong()
                         + " rows added");
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while inserting documents", e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to write JSONEachRow data", e);
+            throw new IllegalStateException("Failed to insert documents into ClickHouse", e);
         }
     }
 
@@ -185,36 +227,50 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         if (idList == null || idList.isEmpty()) {
             return;
         }
-        client.execute(String.format(
-                "DELETE FROM %s WHERE %s IN (%s)",
-                this.getFullTableName(),
-                idColumnName,
-                idList.stream().map(str -> "'" + str + "'").collect(Collectors.joining(","))));
+        validateUpsertTable();
+        String ids =
+                idList.stream().map(ClickHouseValues::convertToQuotedString).collect(Collectors.joining(","));
+        execute(
+                "DELETE FROM %s WHERE %s IN (%s)".formatted(getFullTableName(), this.idColumnName, ids),
+                new CommandSettings());
     }
 
     @Override
     protected void doDelete(Filter.Expression filterExpression) {
         Assert.notNull(filterExpression, "Filter expression must not be null");
 
-        try {
-            String nativeFilterExpression = this.filterExpressionConverter.convertExpression(filterExpression);
-            String sql = String.format("DELETE FROM %s WHERE %s", getFullTableName(), nativeFilterExpression);
-            if (logger.isDebugEnabled()) {
-                logger.debug("Executing delete with filter: " + sql);
-            }
-            this.client.execute(sql);
-        } catch (Exception e) {
-            if (logger.isErrorEnabled()) {
-                logger.error("Failed to delete documents by filter: " + e.getMessage(), e);
-            }
-            throw new IllegalStateException("Failed to delete documents by filter", e);
+        String predicate = this.filterExpressionConverter.convertExpression(filterExpression);
+        CommandSettings settings = new CommandSettings();
+        if (this.upsertEnabled) {
+            validateUpsertTable();
+            // Freeze the IDs from current versions before the mutation visits individual parts.
+            predicate = "has((SELECT groupArray(%1$s) FROM %2$s FINAL WHERE %3$s), %1$s)"
+                    .formatted(this.idColumnName, getFullTableName(), predicate);
+            settings.serverSetting("mutations_execute_subqueries_on_initiator", "1")
+                    .serverSetting("optimize_move_to_prewhere_if_final", "0");
         }
+        execute("DELETE FROM %s WHERE %s".formatted(getFullTableName(), predicate), settings);
     }
 
     @Override
     public List<Document> doSimilaritySearch(SearchRequest request) {
+        return search(this.embeddingModel.embed(request.getQuery()), request);
+    }
+
+    @Override
+    protected boolean supportsQueryEmbeddingSearch() {
+        return true;
+    }
+
+    @Override
+    protected List<Document> doSimilaritySearch(float[] queryEmbedding, SearchRequest request) {
+        checkDimensions("Query embedding", queryEmbedding.length, requiredDimensions());
+        return search(queryEmbedding, request);
+    }
+
+    private List<Document> search(float[] embedding, SearchRequest request) {
+        validateUpsertTable();
         String searchQuery = this.buildSearchQuery(request);
-        float[] embedding = this.embeddingModel.embed(request.getQuery());
         Map<String, Object> sqlQueryParams = Map.of(
                 "embedding", Arrays.toString(embedding),
                 "similarityThreshold", request.getSimilarityThreshold(),
@@ -240,11 +296,12 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         String queryTemplate = """
                 WITH {embedding:Array(Float32)} AS reference_vector
                 SELECT %s, %s, %s, %s(%s, reference_vector) as %s
-                FROM %s
+                FROM %s%s
                 WHERE %s
                   %s
                 ORDER BY distance
                 LIMIT {topK:UInt32}
+                %s
                 """;
         return String.format(
                 queryTemplate,
@@ -255,8 +312,10 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
                 this.embeddingColumnName,
                 DISTANCE_COLUMN_NAME,
                 this.getFullTableName(),
+                this.upsertEnabled ? " FINAL" : "",
                 thresholdClause,
-                filteringClause);
+                filteringClause,
+                this.upsertEnabled ? "SETTINGS optimize_move_to_prewhere_if_final = 0" : "");
     }
 
     private Document mapRecordToDocument(GenericRecord record) {
@@ -286,12 +345,15 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
 
     @Override
     public VectorStoreObservationContext.Builder createObservationContextBuilder(String operationName) {
-        return VectorStoreObservationContext.builder(CLICKHOUSE_VECTOR_STORE, operationName)
+        var builder = VectorStoreObservationContext.builder(CLICKHOUSE_VECTOR_STORE, operationName)
                 .namespace(this.databaseName)
                 .collectionName(this.tableName)
                 .fieldName(this.embeddingColumnName)
-                .dimensions(this.embeddingModel.dimensions())
                 .similarityMetric(getSimilarityMetric());
+        if (this.dimensions > 0) {
+            builder.dimensions(this.dimensions);
+        }
+        return builder;
     }
 
     private String getSimilarityMetric() {
@@ -301,46 +363,98 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         return SIMILARITY_TYPE_MAPPING.get(this.distanceType).value();
     }
 
+    private int requiredDimensions() {
+        if (this.dimensions <= 0) {
+            throw new IllegalStateException(
+                    "Configure vector dimensions when using caller-supplied embeddings with a pre-created table");
+        }
+        return this.dimensions;
+    }
+
     @Override
     public void afterPropertiesSet() throws Exception {
         if (this.initializeSchema) {
-            createDatabase();
+            if (this.dimensions == 0) {
+                this.dimensions = this.embeddingModel.dimensions();
+            }
+            execute("CREATE DATABASE IF NOT EXISTS " + this.databaseName, new CommandSettings());
             createTable();
+            validateUpsertTable();
         }
     }
 
-    private void createDatabase() {
-        client.execute(String.format("CREATE DATABASE IF NOT EXISTS %s", this.databaseName));
-    }
-
     private void createTable() {
-        String queryTemplate = """
+        String vectorIndex = this.upsertEnabled
+                ? ""
+                : ", INDEX annoy_embedding_idx %s TYPE vector_similarity('hnsw', '%s', %d)"
+                        .formatted(this.embeddingColumnName, this.distanceType.getFunctionName(), this.dimensions);
+        String sql = """
                 CREATE TABLE IF NOT EXISTS %s
                 (
-                        %s String,           -- id
-                        %s String,           -- content
-                        %s Array(Float64),   -- embedding
-                        %s JSON,             -- metadata
-                        CONSTRAINT embedding_dimension CHECK length(%s) = %d,
-                        INDEX annoy_embedding_idx %s TYPE vector_similarity('hnsw', '%s', %d)
+                        %s String,
+                        %s String,
+                        %s Array(Float64),
+                        %s JSON,
+                        CONSTRAINT embedding_dimension CHECK length(%s) = %d%s
                 )
-                ENGINE = MergeTree
+                ENGINE = %s
                 ORDER BY %s
-                """;
+                """.formatted(
+                        getFullTableName(),
+                        this.idColumnName,
+                        this.contentColumnName,
+                        this.embeddingColumnName,
+                        this.metadataColumnName,
+                        this.embeddingColumnName,
+                        this.dimensions,
+                        vectorIndex,
+                        this.upsertEnabled ? "ReplacingMergeTree" : "MergeTree",
+                        this.idColumnName);
+        execute(sql, new CommandSettings());
+    }
 
-        client.execute(String.format(
-                queryTemplate,
-                this.getFullTableName(),
-                this.idColumnName,
-                this.contentColumnName,
-                this.embeddingColumnName,
-                this.metadataColumnName,
-                this.embeddingColumnName,
-                this.embeddingModel.dimensions(),
-                this.embeddingColumnName,
-                this.distanceType.getFunctionName(),
-                this.embeddingModel.dimensions(),
-                this.idColumnName));
+    private void validateUpsertTable() {
+        if (!this.upsertEnabled || this.upsertTableValidated) {
+            return;
+        }
+        String sql =
+                """
+                SELECT name FROM system.tables
+                WHERE database = %s AND name = {table:String}
+                  AND engine = 'ReplacingMergeTree' AND sorting_key = {idColumn:String}
+                  AND partition_key = ''
+                  AND (NOT startsWith(engine_full, 'ReplacingMergeTree(')
+                       OR startsWith(engine_full, 'ReplacingMergeTree()'))
+                """.formatted(StringUtils.hasLength(this.databaseName) ? "{database:String}" : "currentDatabase()");
+        Map<String, Object> params = Map.of(
+                "database", Objects.requireNonNullElse(this.databaseName, ""),
+                "table", this.tableName,
+                "idColumn", this.idColumnName);
+        boolean valid;
+        try (var records = client.queryRecords(sql, params).get(this.timeout, TimeUnit.MILLISECONDS)) {
+            valid = records.iterator().hasNext();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while checking the upsert table", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to inspect the ClickHouse upsert table", e);
+        }
+        if (!valid) {
+            throw new IllegalStateException("Upsert requires an unpartitioned ReplacingMergeTree without a version "
+                    + "column, ordered by " + this.idColumnName + ". Check table " + getFullTableName());
+        }
+        this.upsertTableValidated = true;
+    }
+
+    private void execute(String sql, CommandSettings settings) {
+        try (var response = client.execute(sql, settings).get(this.timeout, TimeUnit.MILLISECONDS)) {
+            // Wait for ClickHouse to complete the command and surface server errors.
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while executing a ClickHouse command", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to execute a ClickHouse command", e);
+        }
     }
 
     private String getFullTableName() {
@@ -378,6 +492,8 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         private String metadataColumnName = DEFAULT_METADATA_COLUMN_NAME;
         private DistanceType distanceType = DEFAULT_DISTANCE_TYPE;
         private boolean initializeSchema = DEFAULT_INITIALIZE_SCHEMA;
+        private boolean upsertEnabled;
+        private int dimensions;
 
         private Builder(Client client, EmbeddingModel embeddingModel) {
             super(embeddingModel);
@@ -426,6 +542,17 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
 
         public Builder initializeSchema(boolean initializeSchema) {
             this.initializeSchema = initializeSchema;
+            return this;
+        }
+
+        public Builder upsertEnabled(boolean upsertEnabled) {
+            this.upsertEnabled = upsertEnabled;
+            return this;
+        }
+
+        public Builder dimensions(int dimensions) {
+            Assert.isTrue(dimensions >= 0, "Dimensions must be non-negative");
+            this.dimensions = dimensions;
             return this;
         }
 

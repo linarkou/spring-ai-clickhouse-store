@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.clickhouse.client.api.Client;
@@ -32,6 +33,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.test.vectorstore.BaseVectorStoreTests;
 import org.springframework.ai.transformers.TransformersEmbeddingModel;
+import org.springframework.ai.vectorstore.EmbeddedDocument;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
@@ -193,6 +195,69 @@ class ClickHouseVectorStoreIT extends BaseVectorStoreTests {
                 client.execute("DROP TABLE ai." + tableName).get();
             }
         });
+    }
+
+    @Test
+    void replacesByIdBeforeApplyingFiltersAndLimitEvenBeforePartsMerge() throws Exception {
+        try (Client client = new EmbeddingModelAndClickhouseClientConfiguration().clickhouseClient()) {
+            EmbeddingModel model = mock(EmbeddingModel.class);
+            var store = ClickHouseVectorStore.builder(client, model)
+                    .tableName("upsert_vectors")
+                    .idColumnName("document_id")
+                    .embeddingColumnName("vector")
+                    .upsertEnabled(true)
+                    .dimensions(2)
+                    .initializeSchema(true)
+                    .build();
+            store.afterPropertiesSet();
+            try {
+                client.execute("SYSTEM STOP MERGES ai.upsert_vectors").get();
+                var old = new EmbeddedDocument(new Document("same", "old", Map.of("state", "old")), new float[] {1, 0});
+                var current = new EmbeddedDocument(
+                        new Document("same", "current", Map.of("state", "current")), new float[] {0, 1});
+                var other = new EmbeddedDocument(new Document("other", "other", Map.of()), new float[] {0.8f, 0.6f});
+                store.upsert(List.of(old, other));
+                store.upsert(List.of(old, current));
+                store.upsert(List.of(current));
+                // A fresh store must see the replacement without any previous calls.
+                VectorStore reopened = ClickHouseVectorStore.builder(client, model)
+                        .tableName("upsert_vectors")
+                        .idColumnName("document_id")
+                        .embeddingColumnName("vector")
+                        .upsertEnabled(true)
+                        .dimensions(2)
+                        .build();
+
+                assertThat(reopened.similaritySearch(
+                                new float[] {1, 0},
+                                SearchRequest.builder().topK(1).build()))
+                        .extracting(Document::getId)
+                        .containsExactly("other");
+                assertThat(reopened.similaritySearch(
+                                new float[] {0, 1},
+                                SearchRequest.builder()
+                                        .similarityThreshold(0.99)
+                                        .build()))
+                        .extracting(Document::getText)
+                        .containsExactly("current");
+
+                client.execute("SYSTEM START MERGES ai.upsert_vectors").get();
+                reopened.delete("state == 'old'");
+                assertThat(reopened.similaritySearch(
+                                new float[] {1, 0}, SearchRequest.builder().build()))
+                        .extracting(Document::getText)
+                        .containsExactly("other", "current");
+                reopened.delete("state == 'current'");
+                assertThat(reopened.similaritySearch(
+                                new float[] {1, 0}, SearchRequest.builder().build()))
+                        .extracting(Document::getId)
+                        .containsExactly("other");
+                verifyNoInteractions(model);
+            } finally {
+                client.execute("SYSTEM START MERGES ai.upsert_vectors").get();
+                client.execute("DROP TABLE ai.upsert_vectors").get();
+            }
+        }
     }
 
     public static Stream<Arguments> filterExpressions() {
