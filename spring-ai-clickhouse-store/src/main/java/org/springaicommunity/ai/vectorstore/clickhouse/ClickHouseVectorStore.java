@@ -103,7 +103,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     private DistanceType distanceType;
     private boolean initializeSchema;
     private final boolean upsertEnabled;
-    private volatile boolean upsertTableValidated;
     private int dimensions;
     private long timeout;
     private ClickHouseFilterExpressionConverter filterExpressionConverter;
@@ -189,7 +188,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     }
 
     private void insertRows(List<Map<String, Object>> rows) {
-        validateUpsertTable();
         InputStream inputStream = new ByteArrayInputStream(toJson(rows));
         InsertSettings settings = new InsertSettings();
         if (this.upsertEnabled) {
@@ -227,7 +225,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         if (idList == null || idList.isEmpty()) {
             return;
         }
-        validateUpsertTable();
         String ids =
                 idList.stream().map(ClickHouseValues::convertToQuotedString).collect(Collectors.joining(","));
         execute(
@@ -242,7 +239,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
         String predicate = this.filterExpressionConverter.convertExpression(filterExpression);
         CommandSettings settings = new CommandSettings();
         if (this.upsertEnabled) {
-            validateUpsertTable();
             // Freeze the IDs from current versions before the mutation visits individual parts.
             predicate = "has((SELECT groupArray(%1$s) FROM %2$s FINAL WHERE %3$s), %1$s)"
                     .formatted(this.idColumnName, getFullTableName(), predicate);
@@ -269,7 +265,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
     }
 
     private List<Document> search(float[] embedding, SearchRequest request) {
-        validateUpsertTable();
         String searchQuery = this.buildSearchQuery(request);
         Map<String, Object> sqlQueryParams = Map.of(
                 "embedding", Arrays.toString(embedding),
@@ -379,7 +374,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
             }
             execute("CREATE DATABASE IF NOT EXISTS " + this.databaseName, new CommandSettings());
             createTable();
-            validateUpsertTable();
         }
     }
 
@@ -411,39 +405,6 @@ public class ClickHouseVectorStore extends AbstractObservationVectorStore implem
                         this.upsertEnabled ? "ReplacingMergeTree" : "MergeTree",
                         this.idColumnName);
         execute(sql, new CommandSettings());
-    }
-
-    private void validateUpsertTable() {
-        if (!this.upsertEnabled || this.upsertTableValidated) {
-            return;
-        }
-        String sql =
-                """
-                SELECT name FROM system.tables
-                WHERE database = %s AND name = {table:String}
-                  AND engine = 'ReplacingMergeTree' AND sorting_key = {idColumn:String}
-                  AND partition_key = ''
-                  AND (NOT startsWith(engine_full, 'ReplacingMergeTree(')
-                       OR startsWith(engine_full, 'ReplacingMergeTree()'))
-                """.formatted(StringUtils.hasLength(this.databaseName) ? "{database:String}" : "currentDatabase()");
-        Map<String, Object> params = Map.of(
-                "database", Objects.requireNonNullElse(this.databaseName, ""),
-                "table", this.tableName,
-                "idColumn", this.idColumnName);
-        boolean valid;
-        try (var records = client.queryRecords(sql, params).get(this.timeout, TimeUnit.MILLISECONDS)) {
-            valid = records.iterator().hasNext();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while checking the upsert table", e);
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to inspect the ClickHouse upsert table", e);
-        }
-        if (!valid) {
-            throw new IllegalStateException("Upsert requires an unpartitioned ReplacingMergeTree without a version "
-                    + "column, ordered by " + this.idColumnName + ". Check table " + getFullTableName());
-        }
-        this.upsertTableValidated = true;
     }
 
     private void execute(String sql, CommandSettings settings) {

@@ -12,11 +12,16 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.clickhouse.client.api.Client;
+import com.clickhouse.client.api.insert.InsertResponse;
+import com.clickhouse.client.api.insert.InsertSettings;
 import com.clickhouse.client.api.query.GenericRecord;
 import com.clickhouse.client.api.query.Records;
+import com.clickhouse.data.ClickHouseFormat;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -94,6 +99,32 @@ class ClickHouseVectorStoreTest {
                 .queryRecords(
                         contains("metadata"),
                         eq(Map.of("embedding", "[0.0, 1.0]", "topK", 2, "similarityThreshold", 0.5)));
+        verifyNoInteractions(embeddingModel);
+    }
+
+    @Test
+    void upsertsDirectlyIntoTheConfiguredTable() {
+        var response = mock(InsertResponse.class);
+        when(client.insert(
+                        eq("ai.vector_store"),
+                        any(InputStream.class),
+                        eq(ClickHouseFormat.JSON),
+                        any(InsertSettings.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+        VectorStore store = ClickHouseVectorStore.builder(client, embeddingModel)
+                .upsertEnabled(true)
+                .dimensions(2)
+                .build();
+
+        store.upsert(List.of(new EmbeddedDocument(new Document("text"), new float[] {1, 0})));
+
+        verify(client)
+                .insert(
+                        eq("ai.vector_store"),
+                        any(InputStream.class),
+                        eq(ClickHouseFormat.JSON),
+                        any(InsertSettings.class));
+        verifyNoMoreInteractions(client);
         verifyNoInteractions(embeddingModel);
     }
 

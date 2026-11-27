@@ -92,10 +92,14 @@ for an ID is visible immediately through either search method. A repeated ID wit
 a single upsert uses the last entry in that batch. A vector query works with either
 table engine. Set `dimensions` explicitly when using a pre-created table.
 
-Upsert mode creates an unpartitioned `ReplacingMergeTree` ordered by the document
-ID column, with no version column. Searches use exact distances and resolve the
-latest document version before applying the filter, threshold, and result limit.
-The default `MergeTree` configuration continues to use its HNSW index.
+Upsert mode requires an unpartitioned `ReplacingMergeTree` with the document ID as
+its sole `ORDER BY` column and no engine arguments. The store creates this schema
+when initializing a missing table. For an existing table, check its schema before
+enabling upsert. The store trusts the configured schema, so an incompatible table
+can retain duplicate IDs or return an older version. Searches use exact distances
+and resolve the latest document version before applying the filter, threshold,
+and result limit. The default `MergeTree` configuration continues to use its HNSW
+index.
 
 To enable upsert for an existing `MergeTree` store, create a new table with upsert
 mode and copy the existing documents into it while writes are paused. Choose one row
